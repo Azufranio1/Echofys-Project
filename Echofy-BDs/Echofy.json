@@ -1,0 +1,85 @@
+{
+  "user_profiles": [
+    {
+      "_id": {"$oid": "645d5f4d8f1e8800013d9b1a"},
+      "usuario_id_sql": "e8f1c4c0-7a3b-4e37-a6c2-0e9d5870928f",
+      "favoritos": [
+        {
+          "source": "youtube",
+          "videoId": "4NRXx6ET8s8",
+          "addedAt": "2026-04-15T12:00:00Z"
+        }
+      ],
+      "seguimientos": {
+        "artistas": ["UC_x5XG1OV2P6uZZ5FSM9Ttw"],
+        "usuarios": ["d2b3f4a8-1c0e-4c27-b5bb-9d6b3cc9f4d1"]
+      },
+      "preferencias": {
+        "autoplay": true,
+        "shuffle": false,
+        "repeat": "list",
+        "mostrar_letras": true,
+        "idioma_interfaz": "es"
+      },
+      "createdAt": "2026-04-15T11:55:00Z",
+      "updatedAt": "2026-04-15T11:55:00Z"
+    }
+  ],
+  "playlists": [
+    {
+      "_id": {"$oid": "645d5f4d8f1e8800013d9b1b"},
+      "usuario_id_sql": "e8f1c4c0-7a3b-4e37-a6c2-0e9d5870928f",
+      "nombre": "Noche de Coding",
+      "descripcion": "Música para concentrarse",
+      "publica": true,
+      "link_compartir": "https://echofy.app/pl/abc123xyz",
+      "portada_url": "https://img.youtube.com/vi/4NRXx6ET8s8/maxresdefault.jpg",
+      "items": [
+        {
+          "source": "youtube",
+          "videoId": "4NRXx6ET8s8",
+          "orden": 1,
+          "addedAt": "2026-04-15T12:05:00Z"
+        },
+        {
+          "source": "youtube",
+          "videoId": "YkgkThdzX-8",
+          "orden": 2,
+          "addedAt": "2026-04-15T12:06:00Z"
+        }
+      ],
+      "createdAt": "2026-04-15T12:05:00Z",
+      "updatedAt": "2026-04-15T12:05:00Z"
+    }
+  ],
+  "media_refs": [
+    {
+      "_id": {"$oid": "645d5f4d8f1e8800013d9b1c"},
+      "source": "youtube",
+      "videoId": "4NRXx6ET8s8",
+      "tipo": "audio",
+      "titulo": "Blinding Lights",
+      "canal": "The Weeknd",
+      "thumbnail": "https://i.ytimg.com/vi/4NRXx6ET8s8/maxresdefault.jpg",
+      "duracion_seg": 200,
+      "genero": "Synthwave",
+      "lyrics": "I've been on my own for long enough...",
+      "fecha_lanzamiento": "2020-03-20T00:00:00Z",
+      "url_youtube": "https://www.youtube.com/watch?v=4NRXx6ET8s8",
+      "lastFetchedAt": "2026-04-15T12:10:00Z",
+      "createdAt": "2026-04-15T12:10:00Z",
+      "updatedAt": "2026-04-15T12:10:00Z"
+    }
+  ],
+  "lyrics": [
+    {
+      "_id": {"$oid": "645d5f4d8f1e8800013d9b1d"},
+      "source": "youtube",
+      "videoId": "4NRXx6ET8s8",
+      "idioma": "en",
+      "texto": "I've been on my own for long enough...",
+      "createdAt": "2026-04-15T12:12:00Z",
+      "updatedAt": "2026-04-15T12:12:00Z"
+    }
+  ]
+}
