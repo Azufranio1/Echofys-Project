@@ -1,41 +1,33 @@
-﻿-- 1. Catálogo de tipos de cuenta
-CREATE TABLE IF NOT EXISTS tipos_cuenta (
-    tipo_cuenta_id INT AUTO_INCREMENT PRIMARY KEY,
-    nombre_tipo VARCHAR(50) NOT NULL UNIQUE,
-    descripcion TEXT NULL
-);
-
--- 2. Catálogo de Roles
+﻿-- 1. Roles (Simplificado: Aquí definimos si es User, Artist o Admin)
 CREATE TABLE IF NOT EXISTS roles (
     rol_id INT AUTO_INCREMENT PRIMARY KEY,
-    nombre_rol VARCHAR(50) NOT NULL UNIQUE -- 'Admin', 'User', 'Artist'
+    nombre_rol VARCHAR(50) NOT NULL UNIQUE 
 );
 
--- 3. Tabla Principal de Usuarios (Datos de Cuenta)
+-- 2. Usuarios (Sin la tabla tipos_cuenta, más directo)
 CREATE TABLE IF NOT EXISTS usuarios (
     usuario_id BINARY(16) PRIMARY KEY,
-    email VARCHAR(150) UNIQUE,
+    email VARCHAR(150) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NULL,
     oauth_provider VARCHAR(50) NULL,
     oauth_id VARCHAR(255) NULL UNIQUE,
-    tipo_cuenta_id INT NOT NULL DEFAULT 1,
-    estado ENUM('pendiente','activo','suspendido','cancelado') NOT NULL DEFAULT 'activo',
+    estado ENUM('activo','suspendido','cancelado') NOT NULL DEFAULT 'activo',
     fecha_registro TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fecha_ultimo_acceso TIMESTAMP NULL,
-    CHECK ((password_hash IS NOT NULL) OR (oauth_provider IS NOT NULL AND oauth_id IS NOT NULL)),
-    FOREIGN KEY (tipo_cuenta_id) REFERENCES tipos_cuenta(tipo_cuenta_id)
+    -- Regla: O tiene contraseña o tiene login social
+    CHECK ((password_hash IS NOT NULL) OR (oauth_provider IS NOT NULL AND oauth_id IS NOT NULL))
 );
 
--- 4. Perfiles (Datos Personales y Ubicación)
+-- 3. Perfiles (Ahora sí, con todos los campos de la vista)
 CREATE TABLE IF NOT EXISTS perfiles (
     usuario_id BINARY(16) PRIMARY KEY,
     nombre VARCHAR(100) NULL,
     apellido VARCHAR(100) NULL,
     pais_iso CHAR(2) NULL,
     biografia TEXT NULL,
-    fecha_nacimiento DATE NULL,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(usuario_id) ON DELETE CASCADE
 );
+
 
 -- 5. Asignación de Roles
 CREATE TABLE IF NOT EXISTS usuarios_roles (
@@ -93,12 +85,7 @@ SELECT
     p.nombre,
     p.apellido,
     p.pais_iso,
-    p.region,
-    p.ciudad,
-    p.zona_horaria,
-    p.biografia,
-    p.avatar_url,
-    p.fecha_nacimiento
+    p.biografia
 FROM usuarios u
 LEFT JOIN perfiles p ON u.usuario_id = p.usuario_id
 LEFT JOIN tipos_cuenta tc ON u.tipo_cuenta_id = tc.tipo_cuenta_id
@@ -153,7 +140,38 @@ LEFT JOIN suscripciones_activas sa ON pl.plan_id = sa.plan_id
 GROUP BY pl.plan_id;
 
 -- 9. Rutinas y procedimientos almacenados
+
+-- 4. Registro Unificado (SP Corregido)
 DELIMITER //
+
+CREATE PROCEDURE sp_registrar_usuario_simple(
+    IN p_email VARCHAR(150),
+    IN p_pass_hash VARCHAR(255),
+    IN p_nombre VARCHAR(100),
+    IN p_apellido VARCHAR(100),
+    IN p_rol_nombre VARCHAR(50) -- 'User' o 'Artist'
+)
+BEGIN
+    DECLARE v_user_id BINARY(16);
+    DECLARE v_rol_id INT;
+    SET v_user_id = UUID_TO_BIN(UUID());
+    
+    -- Buscamos el ID del rol solicitado
+    SELECT rol_id INTO v_rol_id FROM roles WHERE nombre_rol = p_rol_nombre LIMIT 1;
+
+    START TRANSACTION;
+        INSERT INTO usuarios (usuario_id, email, password_hash)
+        VALUES (v_user_id, LOWER(TRIM(p_email)), p_pass_hash);
+
+        INSERT INTO perfiles (usuario_id, nombre, apellido)
+        VALUES (v_user_id, p_nombre, p_apellido);
+
+        INSERT INTO usuarios_roles (usuario_id, rol_id)
+        VALUES (v_user_id, v_rol_id);
+    COMMIT;
+
+    SELECT BIN_TO_UUID(v_user_id) AS nuevo_id;
+END //
 
 CREATE PROCEDURE sp_registrar_usuario_local(
     IN p_email VARCHAR(150),
