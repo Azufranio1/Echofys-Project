@@ -1,13 +1,12 @@
+// src/lib/redis.ts
 import { createClient } from 'redis';
 
-const redisClient = createClient({
-    url: process.env.REDIS_URL
-});
+const redisUrl = process.env.REDIS_URL || 'redis://echofy-redis:6379'; // <--- USA EL NOMBRE DEL SERVICIO
 
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
+export const redisClient = createClient({ url: redisUrl });
 
 export const connectRedis = async () => {
-    if (!redisClient.isOpen) await redisClient.connect();
+    if (!redisClient.isOpen) {
+        await redisClient.connect();
+    }
 };
-
-export default redisClient;
