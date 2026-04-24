@@ -7,13 +7,10 @@ services:
     volumes:
       - ./backend:/app
       - /app/node_modules
-    environment:
-      - PORT=8080
-      - MONGO_URI=mongodb://mongo:27017/echofy
-      - DATABASE_URL=mysql://echofy_admin:echofy_password@db_sql:3306/echofy_users
+    env_file:
+      - ./backend/.env
     depends_on:
-      - mongo
-      - db_sql
+      - redis
 
   frontend:
     build: ./frontend
@@ -24,36 +21,8 @@ services:
       - ./frontend:/app
       - /app/node_modules
 
-  mongo:
-    image: mongo:latest
-    container_name: echofy-mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-
-  db_sql:
-    image: mysql:8.0
-    container_name: echofy-mysql
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: root_password
-      MYSQL_DATABASE: echofy_users
-      MYSQL_USER: echofy_admin
-      MYSQL_PASSWORD: echofy_password
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./backend/prisma/init.sql:/docker-entrypoint-initdb.d/init.sql
-
   redis:
     image: redis:7-alpine
     container_name: echofy-redis
     ports:
       - "6379:6379"
-
-volumes:
-  mysql_data: # Para persistir los datos de MySQL
-  mongo_data: # Asegúrate de tener este también para no perder tus canciones
-  
