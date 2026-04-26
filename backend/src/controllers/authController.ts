@@ -3,7 +3,7 @@ import { prisma } from '../lib/db';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'echofy_secret_key_ultra_safe';
+const JWT_SECRET = process.env.JWT_SECRET || 'Mr_Master_Master123';
 
 export const register = async (req: Request, res: Response) => {
   const { email, password, username } = req.body; // username lo mapearemos a 'nombre' en el SP
@@ -70,7 +70,7 @@ const user = users[0];
 
     const token = jwt.sign(
       { id: userIdString, email: user.email },
-      process.env.JWT_SECRET || 'secret_key',
+      process.env.JWT_SECRET || 'Mr_Master_Master123', // ← mismo fallback
       { expiresIn: '24h' }
     );
 

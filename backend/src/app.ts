@@ -7,6 +7,7 @@ import { PrismaClient } from '@prisma/client';
 import musicRoutes from './routes/musicRoutes';
 import authRoutes from './routes/authRoutes';
 import { connectRedis } from './lib/redis';
+import favoritesRouter from './routes/favoriteRoutes';
 
 
 const app = express();
@@ -31,6 +32,7 @@ mongoose.connect(mongoUri)
 connectRedis().then(() => console.log('✅ Conectado a Redis Local'));
 app.use('/api/songs', musicRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/favorites', favoritesRouter);
 
 
 app.listen(PORT, '0.0.0.0', () => {
