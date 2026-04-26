@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { usePlayerStore } from '../store/usePlayerStore';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Music2, Download, ChevronUp } from 'lucide-react';
 import ExpandedPlayer from './ExpandedPlayer';
+import HeartButton from './HeartButton';
 
 const Player = () => {
   const { currentSong, isPlaying, togglePlay, setCurrentSong, setPlaying } = usePlayerStore();
@@ -43,31 +44,23 @@ const Player = () => {
   const handleTimeUpdate = () => {
     if (audioRef.current && !isDragging) setCurrentTime(audioRef.current.currentTime);
   };
-
   const handleLoadedMetadata = () => {
     if (audioRef.current) setDuration(audioRef.current.duration);
   };
-
   const handleVolumeChange = (v: number) => {
     setVolume(v);
-    if (audioRef.current) {
-      audioRef.current.volume = v / 100;
-      setIsMuted(v === 0);
-    }
+    if (audioRef.current) { audioRef.current.volume = v / 100; setIsMuted(v === 0); }
   };
-
   const handleSeek = (t: number) => {
     setCurrentTime(t);
     if (audioRef.current) audioRef.current.currentTime = t;
   };
-
   const toggleMute = () => {
     if (!audioRef.current) return;
     const next = !isMuted;
     audioRef.current.muted = next;
     setIsMuted(next);
   };
-
   const handleDownload = () => {
     if (!currentSong) return;
     const link = document.createElement('a');
@@ -77,37 +70,28 @@ const Player = () => {
     link.click();
     document.body.removeChild(link);
   };
-
   const handleEnded = () => {
     if (!allSongs.length || !currentSong) return;
     const idx = allSongs.findIndex((s) => s._id === currentSong._id);
     const next = allSongs[(idx + 1) % allSongs.length];
     if (next) { setCurrentSong(next); setPlaying(true); }
   };
-
   const handleSkipForward = () => {
     if (!allSongs.length || !currentSong) return;
     const idx = allSongs.findIndex((s) => s._id === currentSong._id);
     const next = allSongs[(idx + 1) % allSongs.length];
     if (next) { setCurrentSong(next); setPlaying(true); }
   };
-
   const handleSkipBack = () => {
     if (currentTime > 3 && audioRef.current) {
-      audioRef.current.currentTime = 0;
-      setCurrentTime(0);
-      return;
+      audioRef.current.currentTime = 0; setCurrentTime(0); return;
     }
     if (!allSongs.length || !currentSong) return;
     const idx = allSongs.findIndex((s) => s._id === currentSong._id);
     const prev = allSongs[(idx - 1 + allSongs.length) % allSongs.length];
     if (prev) { setCurrentSong(prev); setPlaying(true); }
   };
-
-  const handleSelectSong = (song: any) => {
-    setCurrentSong(song);
-    setPlaying(true);
-  };
+  const handleSelectSong = (song: any) => { setCurrentSong(song); setPlaying(true); };
 
   useEffect(() => {
     if (!audioRef.current) return;
@@ -124,26 +108,26 @@ const Player = () => {
     <>
       <style>{`
         .player-root {
-          height: 90px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 0 28px;
-          background: #05050e;
-          font-family: 'Sora', sans-serif;
+          height: 90px; display: flex; align-items: center;
+          justify-content: space-between; padding: 0 28px;
+          background: #05050e; font-family: 'Sora', sans-serif;
         }
         .player-song-info {
-          display: flex; align-items: center; gap: 12px;
-          width: 28%; min-width: 0; cursor: pointer;
+          display: flex; align-items: center; gap: 10px;
+          width: 30%; min-width: 0;
         }
-        .player-song-info:hover .player-song-title { color: #a78bfa; }
+        .player-song-clickable {
+          display: flex; align-items: center; gap: 10px;
+          flex: 1; min-width: 0; cursor: pointer;
+        }
+        .player-song-clickable:hover .player-song-title { color: #a78bfa; }
         .player-expand-hint {
           display: flex; align-items: center; color: #4B5563;
           transition: color 0.2s, transform 0.2s; flex-shrink: 0;
         }
-        .player-song-info:hover .player-expand-hint { color: #8B5CF6; transform: translateY(-2px); }
+        .player-song-clickable:hover .player-expand-hint { color: #8B5CF6; transform: translateY(-2px); }
         .player-artwork {
-          width: 52px; height: 52px; border-radius: 8px; flex-shrink: 0;
+          width: 50px; height: 50px; border-radius: 8px; flex-shrink: 0;
           display: flex; align-items: center; justify-content: center;
           background: linear-gradient(135deg, #1a1030 0%, #2d1a5e 100%);
           border: 1px solid rgba(139,92,246,0.3);
@@ -164,9 +148,9 @@ const Player = () => {
         }
         .player-center {
           display: flex; flex-direction: column; align-items: center;
-          gap: 10px; flex: 1; max-width: 44%;
+          gap: 10px; flex: 1; max-width: 42%;
         }
-        .player-controls { display: flex; align-items: center; gap: 24px; }
+        .player-controls { display: flex; align-items: center; gap: 22px; }
         .player-btn-skip {
           background: none; border: none; cursor: pointer; color: #4B5563;
           display: flex; align-items: center; justify-content: center;
@@ -174,7 +158,7 @@ const Player = () => {
         }
         .player-btn-skip:hover { color: #E5E7EB; transform: scale(1.1); }
         .player-btn-play {
-          width: 42px; height: 42px; border-radius: 50%; border: none; cursor: pointer;
+          width: 40px; height: 40px; border-radius: 50%; border: none; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           background: linear-gradient(135deg, #9b72f5 0%, #6d28d9 100%);
           color: white; transition: transform 0.15s, box-shadow 0.3s;
@@ -182,7 +166,7 @@ const Player = () => {
         }
         .player-btn-play:hover { transform: scale(1.06); }
         .player-btn-play:active { transform: scale(0.95); }
-        .player-btn-play.playing { box-shadow: 0 0 0 2px rgba(139,92,246,0.4), 0 0 24px rgba(109,40,217,0.6); }
+        .player-btn-play.playing { box-shadow: 0 0 0 2px rgba(139,92,246,0.4), 0 0 22px rgba(109,40,217,0.6); }
         .player-progress-row { display: flex; align-items: center; gap: 10px; width: 100%; }
         .player-time {
           font-size: 10px; color: #6B7280; font-variant-numeric: tabular-nums;
@@ -212,7 +196,8 @@ const Player = () => {
           height: calc(100% + 16px); opacity: 0; cursor: pointer;
         }
         .player-right {
-          display: flex; align-items: center; gap: 10px; width: 28%; justify-content: flex-end;
+          display: flex; align-items: center; gap: 8px;
+          width: 28%; justify-content: flex-end;
         }
         .player-icon-btn {
           background: none; border: none; cursor: pointer; color: #4B5563;
@@ -222,7 +207,7 @@ const Player = () => {
         .player-icon-btn.download:hover { color: #10B981; }
         .expanded-overlay {
           position: fixed; inset: 0; z-index: 200;
-          animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: slideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
         @keyframes slideUp {
           from { opacity: 0; transform: translateY(30px); }
@@ -230,7 +215,6 @@ const Player = () => {
         }
       `}</style>
 
-      {/* EXPANDED PLAYER — portal */}
       {isExpanded && createPortal(
         <div className="expanded-overlay">
           <ExpandedPlayer
@@ -253,38 +237,41 @@ const Player = () => {
         document.body
       )}
 
-      {/* MINI PLAYER BAR */}
       <div className="player-root">
+        {/* LEFT: artwork + info + corazón */}
+        <div className="player-song-info">
+          <div className="player-song-clickable" onClick={() => setIsExpanded(true)}>
+            <div className={`player-artwork ${isPlaying ? 'playing' : ''}`}>
+              {currentSong.artwork
+                ? <img src={currentSong.artwork} alt={currentSong.title} className="player-artwork-img" />
+                : <Music2 size={20} color="#8B5CF6" style={{ opacity: 0.8 }} />
+              }
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="player-song-title">{currentSong.title}</div>
+              <div className="player-song-artist">{currentSong.artist}</div>
+            </div>
+            <span className="player-expand-hint"><ChevronUp size={15} /></span>
+          </div>
 
-        {/* LEFT */}
-        <div className="player-song-info" onClick={() => setIsExpanded(true)}>
-          <div className={`player-artwork ${isPlaying ? 'playing' : ''}`}>
-            {currentSong.artwork
-              ? <img src={currentSong.artwork} alt={currentSong.title} className="player-artwork-img" />
-              : <Music2 size={20} color="#8B5CF6" style={{ opacity: 0.8 }} />
-            }
-          </div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="player-song-title">{currentSong.title}</div>
-            <div className="player-song-artist">{currentSong.artist}</div>
-          </div>
-          <span className="player-expand-hint"><ChevronUp size={16} /></span>
+          {/* Corazón — fuera del área clickeable del expanded */}
+          <HeartButton songId={currentSong._id} size={18} />
         </div>
 
         {/* CENTER */}
         <div className="player-center">
           <div className="player-controls">
             <button className="player-btn-skip" onClick={handleSkipBack}>
-              <SkipBack size={20} fill="currentColor" />
+              <SkipBack size={19} fill="currentColor" />
             </button>
             <button className={`player-btn-play ${isPlaying ? 'playing' : ''}`} onClick={togglePlay}>
               {isPlaying
-                ? <Pause size={18} fill="white" />
-                : <Play size={18} fill="white" style={{ marginLeft: '2px' }} />
+                ? <Pause size={17} fill="white" />
+                : <Play size={17} fill="white" style={{ marginLeft: '2px' }} />
               }
             </button>
             <button className="player-btn-skip" onClick={handleSkipForward}>
-              <SkipForward size={20} fill="currentColor" />
+              <SkipForward size={19} fill="currentColor" />
             </button>
           </div>
           <div className="player-progress-row">
@@ -307,7 +294,7 @@ const Player = () => {
           </div>
         </div>
 
-        {/* RIGHT */}
+        {/* RIGHT: descarga + volumen */}
         <div className="player-right">
           <button className="player-icon-btn download" onClick={handleDownload} title="Descargar">
             <Download size={17} />
@@ -315,7 +302,7 @@ const Player = () => {
           <button className="player-icon-btn" onClick={toggleMute}>
             {isMuted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
           </button>
-          <div className="player-bar-wrap" style={{ width: '90px' }}>
+          <div className="player-bar-wrap" style={{ width: '88px' }}>
             <div className="player-bar-track">
               <div className="player-bar-fill" style={{ width: `${volDisplay}%` }} />
             </div>
