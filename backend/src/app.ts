@@ -8,6 +8,7 @@ import musicRoutes from './routes/musicRoutes';
 import authRoutes from './routes/authRoutes';
 import { connectRedis } from './lib/redis';
 import favoritesRouter from './routes/favoriteRoutes';
+import playlistRouter from './routes/playlistRoutes';
 
 
 const app = express();
@@ -33,6 +34,7 @@ connectRedis().then(() => console.log('✅ Conectado a Redis Local'));
 app.use('/api/songs', musicRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/favorites', favoritesRouter);
+app.use('/api/playlists', playlistRouter);
 
 
 app.listen(PORT, '0.0.0.0', () => {

@@ -4,6 +4,7 @@ import Auth from './components/Auth';
 import MainLayout from './components/MainLayout';
 import Home from './pages/Home';
 import Favorites from './pages/Favorites';
+import PlaylistsPage from './pages/Playlists';
 import { loadFavorites } from './hooks/useFavorites';
 
 const App = () => {
@@ -32,7 +33,8 @@ const App = () => {
         ) : (
           <Route path="/" element={<MainLayout onLogout={handleLogout} />}>
             <Route index element={<Home />} />
-            <Route path="favorites" element={<Favorites />} />
+            <Route path="favorites"  element={<Favorites />} />
+            <Route path="playlists"  element={<PlaylistsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         )}

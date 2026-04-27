@@ -1,6 +1,7 @@
 import { usePlayerStore } from '../store/usePlayerStore';
 import { Play, Pause, Music2 } from 'lucide-react';
 import HeartButton from './HeartButton';
+import AddToPlaylistButton from './AddToPlaylistButton';
 
 interface SongListProps {
   songs: any[];
@@ -11,7 +12,7 @@ interface SongListProps {
 const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
   const { currentSong, isPlaying, setCurrentSong, togglePlay } = usePlayerStore();
 
-  const isActive  = (s: any) => currentSong?._id === s._id;
+  const isActive   = (s: any) => currentSong?._id === s._id;
   const isPlaying_ = (s: any) => isActive(s) && isPlaying;
 
   const handlePlay = (song: any) => {
@@ -87,7 +88,7 @@ const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
         }
         .sl-tag.genre { background:rgba(139,92,246,0.1); border-color:rgba(139,92,246,0.2); color:#a78bfa; }
 
-        /* ── LIST: columnas de ~320px ── */
+        /* ── LIST: columnas de ~300px ── */
         .sl-list {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -99,8 +100,7 @@ const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
           background:rgba(255,255,255,0.02);
           border:1px solid rgba(255,255,255,0.05);
           transition:all 0.18s; position:relative;
-          animation:fadeInUp 0.3s ease both;
-          min-width:0;
+          animation:fadeInUp 0.3s ease both; min-width:0;
         }
         .sl-row:hover { background:rgba(139,92,246,0.07); border-color:rgba(139,92,246,0.2); }
         .sl-row.active { background:rgba(139,92,246,0.11); border-color:rgba(139,92,246,0.35); }
@@ -128,7 +128,7 @@ const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
         .sl-row-title { font-size:13px; font-weight:600; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:2px; }
         .sl-row.active .sl-row-title { color:#a78bfa; }
         .sl-row-artist { font-size:11px; color:rgba(255,255,255,0.4); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .sl-row-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+        .sl-row-right { display:flex; align-items:center; gap:4px; flex-shrink:0; }
         .sl-row-tags { display:flex; gap:4px; }
         .sl-row-tag {
           font-size:9px; font-weight:600; letter-spacing:0.07em;
@@ -145,6 +145,7 @@ const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
         }
       `}</style>
 
+      {/* GRID */}
       {viewMode === 'grid' ? (
         <div className="sl-grid">
           {songs.map((song, i) => (
@@ -181,6 +182,7 @@ const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
           ))}
         </div>
       ) : (
+        /* LIST */
         <div className="sl-list">
           {songs.map((song, i) => (
             <div
@@ -208,14 +210,13 @@ const SongList = ({ songs, viewMode, animOffset = 0 }: SongListProps) => {
                 <div className="sl-row-artist">{song.artist}</div>
               </div>
 
-              <div className="sl-row-right">
+              <div className="sl-row-right" onClick={e => e.stopPropagation()}>
                 <div className="sl-row-tags">
                   {song.genre && <span className="sl-row-tag genre">{song.genre}</span>}
                   {song.year  && <span className="sl-row-tag">{song.year}</span>}
                 </div>
-                <div onClick={e => e.stopPropagation()}>
-                  <HeartButton songId={song._id} size={15} />
-                </div>
+                <HeartButton songId={song._id} size={15} />
+                <AddToPlaylistButton songId={song._id} size={15} />
               </div>
             </div>
           ))}
