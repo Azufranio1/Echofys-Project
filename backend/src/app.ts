@@ -23,7 +23,7 @@ prisma.$connect()
   .then(() => console.log('✅ Conectado a MySQL (Alwaysdata)'))
   .catch(err => console.error('❌ Error en MySQL:', err));
 
-const mongoUri = process.env.MONGO_URI || 'mongodb+srv://Echofy-Admin:Mr_Master123@cluster0.iz362.mongodb.net/Echofy-Music-Data';
+const mongoUri = process.env.MONGO_URI
 const PORT = process.env.PORT || 8080;
 
 mongoose.connect(mongoUri)
