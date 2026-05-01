@@ -1,6 +1,6 @@
 import { Outlet, useOutletContext, NavLink, useNavigate } from 'react-router-dom';
 import Player from './Player';
-import { Search, LogOut, Disc3, Home, Heart, ListMusic, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 
 interface MainLayoutProps {
@@ -10,9 +10,10 @@ interface MainLayoutProps {
 export type SearchContextType = { searchQuery: string };
 
 const NAV_ITEMS = [
-  { to: '/',          icon: Home,      label: 'Inicio' },
-  { to: '/favorites', icon: Heart,     label: 'Favoritos' },
-  { to: '/playlists', icon: ListMusic, label: 'Playlists' },
+  { to: '/',          icon: Home,      label: 'Inicio'       },
+  { to: '/recent',    icon: Clock,     label: 'Recientes'    },
+  { to: '/favorites', icon: Heart,     label: 'Favoritos'    },
+  { to: '/playlists', icon: ListMusic, label: 'Playlists'    },
 ];
 
 const MainLayout = ({ onLogout }: MainLayoutProps) => {
