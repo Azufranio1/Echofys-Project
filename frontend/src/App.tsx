@@ -6,6 +6,7 @@ import Home from './pages/Home';
 import Favorites from './pages/Favorites';
 import PlaylistsPage from './pages/Playlists';
 import { loadFavorites } from './hooks/useFavorites';
+import RecentlyPlayedPage from './pages/RecentlyPlayedPage';
 
 const App = () => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
@@ -35,6 +36,7 @@ const App = () => {
             <Route index element={<Home />} />
             <Route path="favorites"  element={<Favorites />} />
             <Route path="playlists"  element={<PlaylistsPage />} />
+            <Route path="recent"    element={<RecentlyPlayedPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         )}

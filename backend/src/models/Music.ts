@@ -13,7 +13,8 @@ const musicSchema = new Schema({
   titleNorm: String,
   artistNorm: String,
   fileHash: String,
-  source: String
+  source: String,
+  playCount: { type: Number, default: 0, index: true },
 }, { 
   timestamps: true, 
   collection: 'Music' 
