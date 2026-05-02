@@ -139,14 +139,14 @@ export const getHomeSections = async (req: Request, res: Response) => {
   try {
     const userId       = req.user.id;
     const statusFilter = { status: { $regex: /^\s*complete\s*$/i } };
-
-    // 1. Historial del usuario
+ 
+    // ── 1. Historial del usuario ──
     const history = await RecentlyPlayed.findOne({ userId })
       .populate({ path: 'plays.songId', model: 'Music' });
-
+ 
     const seen = new Set<string>();
     const recentSongs: any[] = [];
-
+ 
     if (history) {
       for (const p of history.plays) {
         const song = p.songId as any;
@@ -157,92 +157,99 @@ export const getHomeSections = async (req: Request, res: Response) => {
         if (recentSongs.length === 10) break;
       }
     }
-
-    // 2. Géneros y artistas más escuchados (últimas 30 plays)
+ 
+    // ── 2. Géneros y artistas más escuchados por el usuario ──
     const recentIds = history
-      ? history.plays.slice(0, 30)
+      ? history.plays
+          .slice(0, 30)
           .map((p: any) => p.songId?._id?.toString() || p.songId?.toString())
           .filter(Boolean)
       : [];
-
-    let recommended: any[] = [];
-    let listenedGenres: string[] = [];
-
+ 
+    let personalizedRecs: any[] = [];  // recomendaciones personalizadas (gustos exactos)
+    let tasteRecs:        any[] = [];  // recomendaciones según gustos amplios
+    let listenedGenres:   string[] = [];
+ 
     if (recentIds.length > 0) {
       const recentDocs = await Music.find({ _id: { $in: recentIds } });
-
+ 
       const genreCount:  Record<string, number> = {};
       const artistCount: Record<string, number> = {};
       recentDocs.forEach((s: any) => {
         if (s.genre)  genreCount[s.genre]   = (genreCount[s.genre]  || 0) + 1;
         if (s.artist) artistCount[s.artist] = (artistCount[s.artist]|| 0) + 1;
       });
-
-      listenedGenres = Object.keys(genreCount); // todos los géneros escuchados
-
+ 
+      listenedGenres = Object.keys(genreCount);
+ 
       const topGenres  = Object.entries(genreCount).sort((a,b) => b[1]-a[1]).slice(0,3).map(([g])=>g);
       const topArtists = Object.entries(artistCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([a])=>a);
-
-      recommended = await Music.find({
+ 
+      // Personalizadas: mismo artista O mismo género top, no escuchadas
+      personalizedRecs = await Music.find({
         ...statusFilter,
         _id: { $nin: [...seen] },
         $or: [
-          { genre:  { $in: topGenres.map(g  => new RegExp(g,  'i')) } },
-          { artist: { $in: topArtists.map(a => new RegExp(a, 'i')) } },
+          { artist: { $in: topArtists.map(a => new RegExp(`^${a}$`, 'i')) } },
         ],
       })
         .sort({ playCount: -1 })
         .limit(20);
+ 
+      // Según gustos: géneros afines, más amplio
+      const excludeAfterPersonalized = new Set([...seen, ...personalizedRecs.map((s:any) => s._id.toString())]);
+      tasteRecs = await Music.find({
+        ...statusFilter,
+        _id: { $nin: [...excludeAfterPersonalized] },
+        genre: { $in: topGenres.map(g => new RegExp(g, 'i')) },
+      })
+        .sort({ playCount: -1 })
+        .limit(20);
+ 
     } else {
-      recommended = await Music.find(statusFilter).sort({ playCount: -1 }).limit(20);
+      // Sin historial: populares como fallback para ambas secciones
+      personalizedRecs = await Music.find(statusFilter).sort({ playCount: -1 }).limit(20);
+      tasteRecs        = [];
     }
-
-    // 3. Trending — top 20 por playCount
-    const trending = await Music.find(statusFilter)
-      .sort({ playCount: -1 })
+ 
+    // ── 3. Top 20 global (por likeCount + playCount combinados) ──
+    const globalTop = await Music.find(statusFilter)
+      .sort({ likeCount: -1, playCount: -1 })
       .limit(20);
-
-    // 4. Explorar — géneros distintos a los que ya escuchó el usuario, aleatorio
-    //    Obtener todos los géneros disponibles en la BD
-    const allGenres: string[] = await Music.distinct('genre', statusFilter);
-
-    // Géneros nuevos = los que el usuario NO ha escuchado
-    const newGenres = allGenres.filter(
+ 
+    // ── 4. Explorar: géneros distintos a los escuchados ──
+    const allGenres   = await Music.distinct('genre', statusFilter);
+    const newGenres   = allGenres.filter(
       g => g && !listenedGenres.some(lg => lg.toLowerCase() === g.toLowerCase())
     );
-
-    // Si no hay géneros nuevos (escuchó todo), usar todos mezclados
     const exploreGenres = newGenres.length > 0 ? newGenres : allGenres;
-
-    // Tomar hasta 4 géneros al azar y 4 canciones de cada uno → ~16 canciones variadas
-    const shuffled     = exploreGenres.sort(() => Math.random() - 0.5).slice(0, 5);
+    const shuffledGenres = exploreGenres.sort(() => Math.random() - 0.5).slice(0, 5);
+ 
     const explorePerGenre = await Promise.all(
-      shuffled.map(genre =>
-        Music.find({
-          ...statusFilter,
-          genre: { $regex: new RegExp(genre, 'i') },
-        })
-          .sort({ playCount: -1 }) // las más conocidas de ese género
+      shuffledGenres.map(genre =>
+        Music.find({ ...statusFilter, genre: { $regex: new RegExp(genre, 'i') } })
+          .sort({ playCount: -1 })
           .limit(4)
       )
     );
-
-    // Aplanar, deduplicar y mezclar
-    const exploreSet  = new Set<string>();
+ 
+    const exploreSet   = new Set<string>();
     const exploreSongs: any[] = [];
     for (const batch of explorePerGenre) {
       for (const s of batch) {
         const id = s._id.toString();
-        if (!exploreSet.has(id)) {
-          exploreSet.add(id);
-          exploreSongs.push(s);
-        }
+        if (!exploreSet.has(id)) { exploreSet.add(id); exploreSongs.push(s); }
       }
     }
-    // Mezcla final para que no salgan agrupados por género
     exploreSongs.sort(() => Math.random() - 0.5);
-
-    return res.json({ recentSongs, recommended, trending, exploreSongs });
+ 
+    return res.json({
+      recentSongs,       // 1. Volver a escuchar
+      personalizedRecs,  // 2. Recomendaciones personalizadas (mismo artista)
+      tasteRecs,         // 3. Según tus gustos (mismo género)
+      globalTop,         // 4. Top 20 global (likes + plays)
+      exploreSongs,      // 5. Explorar nuevos géneros
+    });
   } catch (err) {
     console.error('getHomeSections error:', err);
     return res.status(500).json({ message: 'Error al cargar home' });
