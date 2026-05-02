@@ -14,6 +14,7 @@ const musicSchema = new Schema({
   artistNorm: String,
   fileHash: String,
   source: String,
+  likeCount: { type: Number, default: 0, index: true },
   playCount: { type: Number, default: 0, index: true },
 }, { 
   timestamps: true, 

@@ -10,6 +10,7 @@ import { connectRedis } from './lib/redis';
 import favoritesRouter from './routes/favoriteRoutes';
 import playlistRouter from './routes/playlistRoutes';
 import queueRouter from './routes/queueRoutes';
+import statsRouter from './routes/statsRoutes';
 
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/favorites', favoritesRouter);
 app.use('/api/playlists', playlistRouter);
 app.use('/api/queue', queueRouter);
+app.use('/api/stats', statsRouter);
 
 
 app.listen(PORT, '0.0.0.0', () => {

@@ -1,6 +1,6 @@
 import { Outlet, useOutletContext, NavLink, useNavigate } from 'react-router-dom';
 import Player from './Player';
-import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight, BarChart2 } from 'lucide-react';
 import { useState } from 'react';
 
 interface MainLayoutProps {
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/recent',    icon: Clock,     label: 'Recientes'    },
   { to: '/favorites', icon: Heart,     label: 'Favoritos'    },
   { to: '/playlists', icon: ListMusic, label: 'Playlists'    },
+  { to: '/stats',     icon: BarChart2, label: 'Tu Ritmo'   },
 ];
 
 const MainLayout = ({ onLogout }: MainLayoutProps) => {
