@@ -2,16 +2,17 @@ import { Request, Response } from 'express';
 import { Music } from '../models/Music';
 import { redisClient } from '../lib/redis'; 
 import { drive } from '../services/driveService';
+import { cacheGet, cacheSet, CACHE_KEYS, TTL } from '../lib/cache';
 
 // 1. Obtener catálogo (con Caché)
 export const getAllSongs = async (req: Request, res: Response) => {
-  const CACHE_KEY = 'Music:all';
+  const cacheKey = CACHE_KEYS.allSongs();
   try {
-    const cached = await redisClient.get(CACHE_KEY);
-    if (cached) return res.json(JSON.parse(cached));
-
+    const cached = await cacheGet<any[]>(cacheKey);
+    if (cached) return res.json(cached);
+ 
     const songs = await Music.find({ status: { $regex: /^\s*complete\s*$/i } });
-    await redisClient.setEx(CACHE_KEY, 3600, JSON.stringify(songs));
+    await cacheSet(cacheKey, songs, TTL.allSongs);
     res.json(songs);
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener canciones' });

@@ -14,11 +14,10 @@ import type { SearchContextType } from '../components/MainLayout';
 type ViewMode = 'grid' | 'list';
 
 interface HomeSections {
-  recentSongs:      any[];
-  personalizedRecs: any[];
-  tasteRecs:        any[];
-  globalTop:        any[];
-  exploreSongs:     any[];
+  recentSongs:  any[];
+  tasteRecs:  any[];
+  globalTop:     any[];
+  exploreSongs: any[];
 }
 
 /* ─────────────────────────────────────────
@@ -332,18 +331,19 @@ const Home = () => {
 
       <div style={{fontFamily:"'Sora',sans-serif"}}>
 
-        {/* Greeting */}
-        <div style={{marginBottom:32, animation:'fadeUp 0.4s ease both'}}>
-          <h2 style={{fontSize:26,fontWeight:800,color:'white',margin:'0 0 4px'}}>Bienvenido de vuelta 👋</h2>
-          <p style={{fontSize:13,color:'rgba(255,255,255,0.35)',margin:0}}>¿Qué quieres escuchar hoy?</p>
-        </div>
+      {/* 2. Recomendado */}
+      {!!sections?.tasteRecs?.length && (
+        <Section icon={<Sparkles size={16} color="#a78bfa"/>} label="Recomendado para ti" color="#8B5CF6" count={sections.tasteRecs.length}>
+          <SongList songs={sections.tasteRecs} viewMode="grid"/>
+        </Section>
+      )}
 
-        {/* 1. Volver a escuchar */}
-        {!!sections?.recentSongs?.length && (
-          <Section icon={<Clock size={16} color="#34d399"/>} label="Volver a escuchar" color="#34d399" delay="60ms">
-            <HorizontalRow songs={sections.recentSongs}/>
-          </Section>
-        )}
+      {/* 3. Trending */}
+      {!!sections?.globalTop?.length && (
+        <Section icon={<TrendingUp size={16} color="#f59e0b"/>} label="Éxitos del momento" color="#f59e0b" count={sections.globalTop.length}>
+          <TrendingList songs={sections.globalTop}/>
+        </Section>
+      )}
 
         {/* 2. Recomendaciones personalizadas (mismo artista) */}
         {!!sections?.personalizedRecs?.length && (
