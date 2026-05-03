@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import Favorite from '../models/Favorite';
 import { Music } from '../models/Music';
+import { cacheDel, CACHE_KEYS } from '../lib/cache';
 
 export const toggleFavorite = async (req: Request, res: Response) => {
   try {
@@ -11,22 +12,29 @@ export const toggleFavorite = async (req: Request, res: Response) => {
 
     if (existing) {
       await Favorite.findByIdAndDelete(existing._id);
-      // Restar 1 al contador de likes (mínimo 0)
-      await Music.findByIdAndUpdate(songId, {
-        $inc: { likeCount: -1 },
-      });
-      // Evitar negativos por si acaso
-      await Music.updateOne(
-        { _id: songId, likeCount: { $lt: 0 } },
-        { $set: { likeCount: 0 } }
+      await Music.findByIdAndUpdate(songId, { $inc: { likeCount: -1 } });
+      await Music.updateOne({ _id: songId, likeCount: { $lt: 0 } }, { $set: { likeCount: 0 } });
+
+      // Invalidar caché: stats + home + top global
+      await cacheDel(
+        CACHE_KEYS.userStats(userId),
+        CACHE_KEYS.homeData(userId),
+        CACHE_KEYS.globalTop()
       );
+
       return res.status(200).json({ isFavorite: false });
     }
 
     const newFav = new Favorite({ userId, songId });
     await newFav.save();
-    // Sumar 1 al contador
     await Music.findByIdAndUpdate(songId, { $inc: { likeCount: 1 } });
+
+    // Invalidar caché
+    await cacheDel(
+      CACHE_KEYS.userStats(userId),
+      CACHE_KEYS.homeData(userId),
+      CACHE_KEYS.globalTop()
+    );
 
     return res.status(201).json({ isFavorite: true });
   } catch (error) {
@@ -36,7 +44,7 @@ export const toggleFavorite = async (req: Request, res: Response) => {
 
 export const getFavorites = async (req: Request, res: Response) => {
   try {
-    const userId   = req.user.id;
+    const userId    = req.user.id;
     const favorites = await Favorite.find({ userId });
     return res.status(200).json(favorites);
   } catch (error) {

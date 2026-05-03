@@ -11,8 +11,8 @@ type ViewMode = 'grid' | 'list';
 
 interface HomeSections {
   recentSongs:  any[];
-  recommended:  any[];
-  trending:     any[];
+  tasteRecs:  any[];
+  globalTop:     any[];
   exploreSongs: any[];
 }
 
@@ -331,16 +331,16 @@ const Home = () => {
       )}
 
       {/* 2. Recomendado */}
-      {!!sections?.recommended?.length && (
-        <Section icon={<Sparkles size={16} color="#a78bfa"/>} label="Recomendado para ti" color="#8B5CF6" count={sections.recommended.length}>
-          <SongList songs={sections.recommended} viewMode="grid"/>
+      {!!sections?.tasteRecs?.length && (
+        <Section icon={<Sparkles size={16} color="#a78bfa"/>} label="Recomendado para ti" color="#8B5CF6" count={sections.tasteRecs.length}>
+          <SongList songs={sections.tasteRecs} viewMode="grid"/>
         </Section>
       )}
 
       {/* 3. Trending */}
-      {!!sections?.trending?.length && (
-        <Section icon={<TrendingUp size={16} color="#f59e0b"/>} label="Éxitos del momento" color="#f59e0b" count={sections.trending.length}>
-          <TrendingList songs={sections.trending}/>
+      {!!sections?.globalTop?.length && (
+        <Section icon={<TrendingUp size={16} color="#f59e0b"/>} label="Éxitos del momento" color="#f59e0b" count={sections.globalTop.length}>
+          <TrendingList songs={sections.globalTop}/>
         </Section>
       )}
 

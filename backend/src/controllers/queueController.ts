@@ -1,36 +1,28 @@
 import { Request, Response } from 'express';
 import RecentlyPlayed from '../models/RecentlyPlayed';
 import { Music } from '../models/Music';
+import { cacheGet, cacheSet, cacheDel, CACHE_KEYS, TTL } from '../lib/cache';
 
-const MAX_HISTORY = 100;
+const MAX_HISTORY  = 100;
+const statusFilter = { status: { $regex: /^\s*complete\s*$/i } };
 
-/* ─────────────────────────────────────────
-   POST /api/queue/played  { songId }
-   Registra reproducción + incrementa playCount
-───────────────────────────────────────── */
+/* ── POST /api/queue/played ── */
 export const registerPlay = async (req: Request, res: Response) => {
   try {
     const userId  = req.user.id;
     const { songId } = req.body;
     if (!songId) return res.status(400).json({ message: 'songId requerido' });
 
-    // Registrar en historial del usuario
     await RecentlyPlayed.findOneAndUpdate(
       { userId },
-      {
-        $push: {
-          plays: {
-            $each:     [{ songId, playedAt: new Date() }],
-            $position: 0,
-            $slice:    MAX_HISTORY,
-          },
-        },
-      },
+      { $push: { plays: { $each: [{ songId, playedAt: new Date() }], $position: 0, $slice: MAX_HISTORY } } },
       { upsert: true, new: true }
     );
 
-    // Incrementar contador global de reproducciones
     await Music.findByIdAndUpdate(songId, { $inc: { playCount: 1 } });
+
+    // Invalidar caché del home y stats del usuario (datos frescos)
+    await cacheDel(CACHE_KEYS.homeData(userId), CACHE_KEYS.userStats(userId));
 
     return res.status(201).json({ ok: true });
   } catch (err) {
@@ -39,10 +31,7 @@ export const registerPlay = async (req: Request, res: Response) => {
   }
 };
 
-/* ─────────────────────────────────────────
-   GET /api/queue/next?songId=xxx
-   Cola recomendada: 2 artista + 2 género + 2 recientes + 2 explorar
-───────────────────────────────────────── */
+/* ── GET /api/queue/next?songId=xxx ── */
 export const getNextQueue = async (req: Request, res: Response) => {
   try {
     const userId     = req.user.id;
@@ -53,14 +42,13 @@ export const getNextQueue = async (req: Request, res: Response) => {
     if (!current) return res.status(404).json({ message: 'Canción no encontrada' });
 
     const { artist, genre, _id: currentId } = current as any;
-
     const history   = await RecentlyPlayed.findOne({ userId });
     const recentIds = history
       ? history.plays.slice(0, 20).map((p: any) => p.songId.toString()).filter((id: string) => id !== currentId.toString())
       : [];
 
     const selected = new Set<string>([currentId.toString()]);
-    const shuffle  = <T>(arr: T[]): T[] => arr.sort(() => Math.random() - 0.5);
+    const shuffle  = <T>(arr: T[]): T[] => [...arr].sort(() => Math.random() - 0.5);
     const collect  = (songs: any[], n: number): any[] => {
       const result: any[] = [];
       for (const s of shuffle(songs)) {
@@ -69,8 +57,6 @@ export const getNextQueue = async (req: Request, res: Response) => {
       }
       return result;
     };
-
-    const statusFilter = { status: { $regex: /^\s*complete\s*$/i } };
 
     const [byArtist, byGenre, recentSongs, exploreSongs] = await Promise.all([
       Music.find({ artist: { $regex: new RegExp(artist, 'i') }, ...statusFilter, _id: { $ne: currentId } }).limit(20),
@@ -94,10 +80,7 @@ export const getNextQueue = async (req: Request, res: Response) => {
   }
 };
 
-/* ─────────────────────────────────────────
-   GET /api/queue/recent?limit=N
-   Historial del usuario deduplicado y populado
-───────────────────────────────────────── */
+/* ── GET /api/queue/recent ── */
 export const getRecentlyPlayed = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
@@ -105,16 +88,11 @@ export const getRecentlyPlayed = async (req: Request, res: Response) => {
 
     const history = await RecentlyPlayed.findOne({ userId })
       .populate({ path: 'plays.songId', model: 'Music' });
-
     if (!history) return res.json([]);
 
     const seen  = new Set<string>();
     const plays = history.plays
-      .filter((p: any) => {
-        const id = p.songId?._id?.toString();
-        if (!id || seen.has(id)) return false;
-        seen.add(id); return true;
-      })
+      .filter((p: any) => { const id = p.songId?._id?.toString(); if (!id || seen.has(id)) return false; seen.add(id); return true; })
       .slice(0, limit)
       .map((p: any) => ({ song: p.songId, playedAt: p.playedAt }));
 
@@ -125,28 +103,26 @@ export const getRecentlyPlayed = async (req: Request, res: Response) => {
   }
 };
 
-/* ─────────────────────────────────────────
-   GET /api/queue/home
-   Tres secciones para el home:
-     - recentSongs:  últimas 10 únicas del usuario
-     - recommended:  20 canciones basadas en gustos recientes
-     - trending:     20 más reproducidas globalmente
-───────────────────────────────────────── */
-// Reemplaza SOLO la función getHomeSections en queueController.ts
-// El resto del archivo queda igual.
-
+/* ── GET /api/queue/home ── con caché por usuario + global top cacheado separado ── */
 export const getHomeSections = async (req: Request, res: Response) => {
   try {
-    const userId       = req.user.id;
+    const userId   = req.user.id;
+    const homeKey  = CACHE_KEYS.homeData(userId);
+    const topKey   = CACHE_KEYS.globalTop();
+ 
+    // 1. Caché del home completo
+    const cachedHome = await cacheGet<any>(homeKey);
+    if (cachedHome) return res.json(cachedHome);
+ 
     const statusFilter = { status: { $regex: /^\s*complete\s*$/i } };
-
-    // 1. Historial del usuario
+ 
+    // 2. Historial del usuario
     const history = await RecentlyPlayed.findOne({ userId })
       .populate({ path: 'plays.songId', model: 'Music' });
-
+ 
     const seen = new Set<string>();
     const recentSongs: any[] = [];
-
+ 
     if (history) {
       for (const p of history.plays) {
         const song = p.songId as any;
@@ -157,92 +133,141 @@ export const getHomeSections = async (req: Request, res: Response) => {
         if (recentSongs.length === 10) break;
       }
     }
-
-    // 2. Géneros y artistas más escuchados (últimas 30 plays)
+ 
+    // IDs de plays recientes para análisis
     const recentIds = history
-      ? history.plays.slice(0, 30)
+      ? history.plays
+          .slice(0, 30)
           .map((p: any) => p.songId?._id?.toString() || p.songId?.toString())
           .filter(Boolean)
       : [];
-
-    let recommended: any[] = [];
-    let listenedGenres: string[] = [];
-
+ 
+    let personalizedRecs: any[] = [];
+    let tasteRecs:        any[] = [];
+    let listenedGenres:   string[] = [];
+ 
     if (recentIds.length > 0) {
       const recentDocs = await Music.find({ _id: { $in: recentIds } });
-
+ 
+      // Contar géneros y artistas
       const genreCount:  Record<string, number> = {};
       const artistCount: Record<string, number> = {};
       recentDocs.forEach((s: any) => {
         if (s.genre)  genreCount[s.genre]   = (genreCount[s.genre]  || 0) + 1;
         if (s.artist) artistCount[s.artist] = (artistCount[s.artist]|| 0) + 1;
       });
-
-      listenedGenres = Object.keys(genreCount); // todos los géneros escuchados
-
-      const topGenres  = Object.entries(genreCount).sort((a,b) => b[1]-a[1]).slice(0,3).map(([g])=>g);
-      const topArtists = Object.entries(artistCount).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([a])=>a);
-
-      recommended = await Music.find({
-        ...statusFilter,
-        _id: { $nin: [...seen] },
-        $or: [
-          { genre:  { $in: topGenres.map(g  => new RegExp(g,  'i')) } },
-          { artist: { $in: topArtists.map(a => new RegExp(a, 'i')) } },
-        ],
-      })
-        .sort({ playCount: -1 })
-        .limit(20);
+ 
+      listenedGenres = Object.keys(genreCount);
+ 
+      const topArtists = Object.entries(artistCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([a]) => a);
+ 
+      const topGenres = Object.entries(genreCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([g]) => g);
+ 
+      // ── Personalizadas: mismo artista ──
+      // Escapa caracteres especiales de regex para artistas con símbolos (&, ., etc.)
+      const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+ 
+      if (topArtists.length > 0) {
+        personalizedRecs = await Music.find({
+          ...statusFilter,
+          _id:    { $nin: [...seen] },
+          artist: { $in: topArtists.map(a => new RegExp(escapeRegex(a), 'i')) },
+        })
+          .sort({ playCount: -1 })
+          .limit(20);
+      }
+ 
+      // Si no hay suficientes por artista, completa con populares generales
+      if (personalizedRecs.length < 5) {
+        const extraIds = new Set([...seen, ...personalizedRecs.map((s: any) => s._id.toString())]);
+        const extras   = await Music.find({ ...statusFilter, _id: { $nin: [...extraIds] } })
+          .sort({ playCount: -1 })
+          .limit(20 - personalizedRecs.length);
+        personalizedRecs = [...personalizedRecs, ...extras];
+      }
+ 
+      // ── Según gustos: mismo género ──
+      const excludeP = new Set([...seen, ...personalizedRecs.map((s: any) => s._id.toString())]);
+ 
+      if (topGenres.length > 0) {
+        tasteRecs = await Music.find({
+          ...statusFilter,
+          _id:   { $nin: [...excludeP] },
+          genre: { $in: topGenres.map(g => new RegExp(escapeRegex(g), 'i')) },
+        })
+          .sort({ playCount: -1 })
+          .limit(20);
+      }
+ 
+      // Fallback si no hay suficientes por género
+      if (tasteRecs.length < 5) {
+        const excludeT = new Set([...excludeP, ...tasteRecs.map((s: any) => s._id.toString())]);
+        const extras   = await Music.find({ ...statusFilter, _id: { $nin: [...excludeT] } })
+          .sort({ playCount: -1 })
+          .limit(20 - tasteRecs.length);
+        tasteRecs = [...tasteRecs, ...extras];
+      }
+ 
     } else {
-      recommended = await Music.find(statusFilter).sort({ playCount: -1 }).limit(20);
+      // Sin historial — populares como fallback para ambas secciones
+      const popular = await Music.find(statusFilter).sort({ playCount: -1 }).limit(40);
+      personalizedRecs = popular.slice(0, 20);
+      tasteRecs        = popular.slice(20);
     }
-
-    // 3. Trending — top 20 por playCount
-    const trending = await Music.find(statusFilter)
-      .sort({ playCount: -1 })
-      .limit(20);
-
-    // 4. Explorar — géneros distintos a los que ya escuchó el usuario, aleatorio
-    //    Obtener todos los géneros disponibles en la BD
-    const allGenres: string[] = await Music.distinct('genre', statusFilter);
-
-    // Géneros nuevos = los que el usuario NO ha escuchado
-    const newGenres = allGenres.filter(
+ 
+    // 3. Top 20 global — caché compartida entre usuarios
+    let globalTop = await cacheGet<any[]>(topKey);
+    if (!globalTop || globalTop.length === 0) {
+      globalTop = await Music.find(statusFilter)
+        .sort({ likeCount: -1, playCount: -1 })
+        .limit(20);
+      await cacheSet(topKey, globalTop, TTL.globalTop);
+    }
+ 
+    // 4. Explorar géneros nuevos
+    const allGenres     = await Music.distinct('genre', statusFilter);
+    const newGenres     = allGenres.filter(
       g => g && !listenedGenres.some(lg => lg.toLowerCase() === g.toLowerCase())
     );
-
-    // Si no hay géneros nuevos (escuchó todo), usar todos mezclados
-    const exploreGenres = newGenres.length > 0 ? newGenres : allGenres;
-
-    // Tomar hasta 4 géneros al azar y 4 canciones de cada uno → ~16 canciones variadas
-    const shuffled     = exploreGenres.sort(() => Math.random() - 0.5).slice(0, 5);
+    const explorePool   = newGenres.length > 0 ? newGenres : allGenres;
+    const shuffled      = [...explorePool].sort(() => Math.random() - 0.5).slice(0, 5);
+ 
     const explorePerGenre = await Promise.all(
       shuffled.map(genre =>
-        Music.find({
-          ...statusFilter,
-          genre: { $regex: new RegExp(genre, 'i') },
-        })
-          .sort({ playCount: -1 }) // las más conocidas de ese género
+        Music.find({ ...statusFilter, genre: { $regex: new RegExp(genre, 'i') } })
+          .sort({ playCount: -1 })
           .limit(4)
       )
     );
-
-    // Aplanar, deduplicar y mezclar
-    const exploreSet  = new Set<string>();
+ 
+    const exploreSet   = new Set<string>();
     const exploreSongs: any[] = [];
     for (const batch of explorePerGenre) {
       for (const s of batch) {
         const id = s._id.toString();
-        if (!exploreSet.has(id)) {
-          exploreSet.add(id);
-          exploreSongs.push(s);
-        }
+        if (!exploreSet.has(id)) { exploreSet.add(id); exploreSongs.push(s); }
       }
     }
-    // Mezcla final para que no salgan agrupados por género
     exploreSongs.sort(() => Math.random() - 0.5);
-
-    return res.json({ recentSongs, recommended, trending, exploreSongs });
+ 
+    // 5. Ensamblar respuesta — nombres de keys consistentes con el frontend
+    const result = {
+      recentSongs,        // Volver a escuchar
+      personalizedRecs,   // Recomendado para ti
+      tasteRecs,          // Según tus gustos
+      globalTop,          // Top 20 global
+      exploreSongs,       // Explorar nuevos géneros
+    };
+ 
+    await cacheSet(homeKey, result, TTL.home);
+    return res.json(result);
+ 
   } catch (err) {
     console.error('getHomeSections error:', err);
     return res.status(500).json({ message: 'Error al cargar home' });
