@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Clock, LayoutGrid, List, Music2 } from 'lucide-react';
 import SongList from '../components/SongList';
+import { API, authHeaders } from '../lib/api';
 
 type ViewMode = 'grid' | 'list';
 
@@ -20,7 +21,7 @@ const RecentlyPlayedPage = () => {
     const fetch_ = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res   = await fetch('http://localhost:8080/api/queue/recent?limit=50', {
+        const res   = await fetch(`${API.player}/recent?limit=50`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();

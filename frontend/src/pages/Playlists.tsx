@@ -4,6 +4,7 @@ import { ListMusic, Plus, Globe, Lock, Trash2, Edit3, Play, ChevronRight,
 import { usePlaylists, type Playlist } from '../hooks/usePlaylists';
 import { usePlayerStore } from '../store/usePlayerStore';
 import HeartButton from '../components/HeartButton';
+import { API, authHeaders } from '../lib/api';
 
 /* ────────────── Modal crear/editar ────────────── */
 interface ModalProps {

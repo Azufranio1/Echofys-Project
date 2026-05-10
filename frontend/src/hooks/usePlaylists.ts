@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { API, authHeaders } from '../lib/api';
 
 export interface Playlist {
   _id: string;
@@ -10,7 +11,7 @@ export interface Playlist {
   updatedAt: string;
 }
 
-const BASE = 'http://localhost:8080/api/playlists';
+const BASE = API.playlists;
 const getToken = () => localStorage.getItem('token');
 const headers = () => ({
   'Content-Type': 'application/json',
