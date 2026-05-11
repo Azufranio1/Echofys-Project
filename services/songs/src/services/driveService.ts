@@ -9,7 +9,6 @@ const auth = new google.auth.GoogleAuth({
   scopes: SCOPES,
 });
 
-// AÑADIMOS 'export' AQUÍ
 export const drive = google.drive({ version: 'v3', auth });
 
 export const getFileStream = async (fileId: string) => {
