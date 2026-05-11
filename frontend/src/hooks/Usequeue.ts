@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
+import { API, authHeaders } from '../lib/api';
 
-const BASE = 'http://localhost:8080/api/queue';
+const BASE = API.player;
 const getToken = () => localStorage.getItem('token');
 const authHeaders = () => ({
   'Content-Type': 'application/json',

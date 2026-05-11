@@ -10,6 +10,7 @@ import HeartButton from '../components/HeartButton';
 import AddToPlaylistButton from '../components/AddToPlaylistButton';
 import SongList from '../components/SongList';
 import type { SearchContextType } from '../components/MainLayout';
+import { API, authHeaders } from '../lib/api';
 
 type ViewMode = 'grid' | 'list';
 
@@ -247,8 +248,8 @@ const Home = () => {
       const hdrs  = { Authorization: `Bearer ${token}` };
       try {
         const [homeRes, allRes] = await Promise.all([
-          fetch('http://localhost:8080/api/queue/home', { headers: hdrs }),
-          fetch('http://localhost:8080/api/songs',      { headers: hdrs }),
+          fetch(`${API.player}/home`, { headers: hdrs }),
+          fetch(`${API.songs}`, { headers: hdrs }),
         ]);
         const [homeData, allData] = await Promise.all([homeRes.json(), allRes.json()]);
         setSections(homeData);

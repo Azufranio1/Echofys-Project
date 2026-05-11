@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Mail, Lock, User, ArrowRight, Disc3 } from 'lucide-react';
+import { API, authHeaders } from '../lib/api';
 
 const Auth = ({ onLoginSuccess }: { onLoginSuccess: (token: string) => void }) => {
   const [isLogin, setIsLogin] = useState(true);
@@ -79,10 +80,10 @@ const Auth = ({ onLoginSuccess }: { onLoginSuccess: (token: string) => void }) =
     }
     setError('');
     setLoading(true);
-    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+    const url = isLogin ? API.auth + '/login' : API.auth + '/register';
 
     try {
-      const res = await fetch(`http://localhost:8080${endpoint}`, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

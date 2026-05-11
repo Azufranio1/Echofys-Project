@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart2, Music2, Play, Mic2, Clock, Compass, Flame, Users } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
+import { API, authHeaders } from '../lib/api';
 
 interface StatsData {
   empty:               boolean;
@@ -42,7 +43,7 @@ const StatsPage = () => {
     const load = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res   = await fetch('http://localhost:8080/api/stats', {
+        const res   = await fetch(`${API.stats}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setData(await res.json());

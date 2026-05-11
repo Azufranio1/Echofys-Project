@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { API, authHeaders } from '../lib/api';
 
 // Set de IDs de canciones que el usuario tiene como favoritas
 let globalFavoriteIds: Set<string> = new Set();
@@ -9,10 +10,12 @@ const notify = () => listeners.forEach((fn) => fn());
 
 const getToken = () => localStorage.getItem('token');
 
+const BASE = API.favorites;
+
 // Carga inicial — se llama una vez al montar la app
 export const loadFavorites = async () => {
   try {
-    const res = await fetch('http://localhost:8080/api/favorites', {
+    const res = await fetch(BASE, {
       headers: { Authorization: `Bearer ${getToken()}` },
     });
     const data = await res.json();
@@ -49,7 +52,7 @@ export const useFavorites = () => {
     notify();
 
     try {
-      const res = await fetch('http://localhost:8080/api/favorites/toggle', {
+      const res = await fetch(`${BASE}/toggle`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

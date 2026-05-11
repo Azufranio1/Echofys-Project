@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Heart, LayoutGrid, List, Music2 } from 'lucide-react';
 import SongList from '../components/SongList';
 import { useFavorites } from '../hooks/useFavorites';
+import { API, authHeaders } from '../lib/api';
 
 type ViewMode = 'grid' | 'list';
 
@@ -17,7 +18,7 @@ const Favorites = () => {
     const fetch_ = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:8080/api/songs', {
+        const res = await fetch(API.songs, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const data = await res.json();

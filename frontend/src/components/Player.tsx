@@ -69,7 +69,7 @@ const Player = () => {
   const handleDownload = () => {
     if (!currentSong) return;
     const a = document.createElement('a');
-    a.href = `http://localhost:8080/api/songs/stream/${currentSong.driveId}?download=true`;
+    a.href = `${API.songs}/stream/${currentSong.driveId}?download=true`;
     a.setAttribute('download', `${currentSong.title}.mp3`);
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
@@ -236,7 +236,7 @@ const Player = () => {
         <audio
           ref={audioRef}
           key={currentSong.driveId}
-          src={`http://localhost:8080/api/songs/stream/${currentSong.driveId}`}
+          src={`${API.songs}/stream/${currentSong.driveId}`}
           preload="auto"
           onWaiting={() => setIsBuffering(true)}
           onCanPlay={() => setIsBuffering(false)}
