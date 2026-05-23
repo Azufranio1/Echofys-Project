@@ -104,7 +104,7 @@ services:
       - redis
     restart: unless-stopped
 
-  # ── LYRICS  8087 ──────────────────────────────────────
+# ── LYRICS  8087 ──────────────────────────────────────
   lyrics:
     build: ./services/lyrics
     container_name: echofy-lyrics
@@ -115,4 +115,6 @@ services:
       - /app/node_modules
     env_file:
       - ./services/lyrics/.env
+    depends_on:
+      - redis
     restart: unless-stopped

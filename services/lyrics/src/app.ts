@@ -1,25 +1,31 @@
-import express from 'express';
-import mongoose from 'mongoose';
-import cors from 'cors';
-// import lyricsRoutes from './routes/lyricsRoutes'; // ← tu compañero implementa esto
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import connectDB from "./lib/db";
+import { connectRedis } from "./lib/redis";
+import lyricsRoutes from "./routes/lyricsRoutes";
 
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-mongoose.connect(process.env.MONGO_URI!)
-  .then(() => console.log('✅ Lyrics: MongoDB conectado'))
-  .catch(err => console.error('❌ Lyrics: MongoDB error', err));
-
-// app.use('/api/lyrics', lyricsRoutes); // ← descomentar cuando esté listo
-
-// Health check para que el contenedor no falle vacío
-app.get('/api/lyrics/health', (req, res) => {
-  res.json({ status: 'ok', service: 'lyrics', message: 'Pendiente de implementación' });
+app.get("/health", (_req, res) => {
+  res.json({ service: "echofy-lyrics", status: "ok" });
 });
 
-app.listen(PORT, '0.0.0.0', () =>
-  console.log(`🚀 Lyrics service listo en puerto ${PORT}`)
-);
+app.use("/lyrics", lyricsRoutes);
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[lyrics] Error:", err.message);
+  res.status(500).json({ error: "Error interno del servidor" });
+});
+
+const start = async () => {
+  await connectDB();
+  await connectRedis();
+  app.listen(PORT, () => console.log(`[lyrics] Corriendo en puerto ${PORT}`));
+};
+
+start();
