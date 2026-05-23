@@ -282,7 +282,7 @@ const PlaylistsPage = () => {
     const fetch_ = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:8080/api/songs', { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(API.songs, { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
         setAllSongs(Array.isArray(data) ? data : []);
       } catch {}

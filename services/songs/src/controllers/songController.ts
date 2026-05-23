@@ -73,6 +73,7 @@ export const streamSong = async (req: Request, res: Response) => {
       stream.data.pipe(res);
     }
   } catch (error: any) {
-    res.status(500).json({ error: 'Error en el streaming de Drive' });
-  }
+  console.error('Drive error completo:', JSON.stringify(error?.message || error));
+  res.status(500).json({ error: 'Error en el streaming de Drive', detail: error?.message });
+}
 };

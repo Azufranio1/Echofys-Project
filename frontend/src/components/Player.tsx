@@ -5,6 +5,7 @@ import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Music2, Download,
 import ExpandedPlayer from './ExpandedPlayer';
 import HeartButton from './HeartButton';
 import { useQueue } from '../hooks/useQueue';
+import { API, authHeaders } from '../lib/api';
 
 const Player = () => {
   const { currentSong, isPlaying, togglePlay, setCurrentSong, setPlaying } = usePlayerStore();

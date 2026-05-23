@@ -6,7 +6,10 @@ RUN apt-get update -y && apt-get install -y openssl
 WORKDIR /app
 
 COPY package*.json ./
+
 RUN npm install
+
+COPY service-account.json ./
 
 COPY . .
 

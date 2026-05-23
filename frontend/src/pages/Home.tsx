@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { usePlayerStore } from '../store/usePlayerStore';
-import {
-  Play, Pause, Music2, LayoutGrid, List,
-  Clock, Sparkles, Star, TrendingUp, Compass, Search,
-  Heart
-} from 'lucide-react';
+import { Play, Pause, Music2, LayoutGrid, List, Clock, Sparkles, Star, TrendingUp, Compass, Search, Heart } from 'lucide-react';
 import HeartButton from '../components/HeartButton';
 import AddToPlaylistButton from '../components/AddToPlaylistButton';
 import SongList from '../components/SongList';
@@ -342,7 +338,7 @@ const Home = () => {
       {/* 3. Trending */}
       {!!sections?.globalTop?.length && (
         <Section icon={<TrendingUp size={16} color="#f59e0b"/>} label="Éxitos del momento" color="#f59e0b" count={sections.globalTop.length}>
-          <TrendingList songs={sections.globalTop}/>
+          <GlobalTopList songs={sections.globalTop}/>
         </Section>
       )}
 
