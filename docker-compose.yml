@@ -141,13 +141,6 @@ services:
       - "8090:8090"
     volumes:
       - ./services/ai:/app
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     env_file:
       - ./services/ai/.env
     depends_on:
@@ -163,4 +156,12 @@ services:
       - "11434:11434"
     volumes:
       - ./ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
     restart: unless-stopped
