@@ -122,16 +122,16 @@ services:
 # ── INGESTOR ──────────────────────────────────────
 
   ingestor:
-  build: ./services/ingestor
-  container_name: echofy-ingestor
-  # Sin ports: solo accesible internamente
-  volumes:
-    - ./services/ingestor:/app
-    - ./services/ingestor/downloads:/app/downloads
-    - ./services/ingestor/service-account.json:/app/service-account.json
-  env_file:
-    - ./services/ingestor/.env
-  restart: unless-stopped
+    build: ./services/ingestor
+    container_name: echofy-ingestor
+    # Sin ports: solo accesible internamente
+    volumes:
+      - ./services/ingestor:/app
+      - ./services/ingestor/downloads:/app/downloads
+      - ./services/ingestor/service-account.json:/app/service-account.json
+    env_file:
+      - ./services/ingestor/.env
+    restart: unless-stopped
 
 # ── AI ─────────────────────────────────────────────
 
