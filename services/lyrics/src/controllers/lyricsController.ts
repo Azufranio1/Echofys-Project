@@ -64,7 +64,7 @@ export const getLyrics = async (req: AuthRequest, res: Response): Promise<void> 
   });
 };
 
-]export const fetchAndSaveLyrics = async (req: AuthRequest, res: Response): Promise<void> => {
+export const fetchAndSaveLyrics = async (req: AuthRequest, res: Response): Promise<void> => {
   const { songId } = req.params;
   const { trackName, artistName, albumName, duration } = req.body as {
     trackName: string; artistName: string; albumName?: string; duration?: number;
@@ -88,34 +88,19 @@ export const getLyrics = async (req: AuthRequest, res: Response): Promise<void> 
     return;
   }
 
-  try {
-    const lyrics = await Lyrics.create({
-      songId, trackName, artistName,
-      albumName,
-      durationSeconds: duration,
-      plainLyrics:  result.plainLyrics  ?? undefined,
-      syncedLyrics: result.syncedLyrics ?? undefined,
-      source:       result.source === "manual" ? "manual" : "lrclib",
-      instrumental: result.instrumental,
-    });
+  const lyrics = await Lyrics.create({
+    songId, trackName, artistName,
+    albumName,
+    durationSeconds: duration,
+    plainLyrics:  result.plainLyrics  ?? undefined,
+    syncedLyrics: result.syncedLyrics ?? undefined,
+    source:       result.source === "manual" ? "manual" : "lrclib",
+    instrumental: result.instrumental,
+  });
 
-    const payload = buildPayload(lyrics);
-    await cacheSet(`lyrics:${songId}`, payload);
-    res.status(201).json({ ...payload, servedFrom: result.source });
-
-  } catch (err: any) {
-    // Si hay duplicate key, la canción ya fue insertada por otra petición simultánea
-    if (err.code === 11000) {
-      const saved = await Lyrics.findOne({ songId });
-      if (saved) {
-        const payload = buildPayload(saved);
-        await cacheSet(`lyrics:${songId}`, payload);
-        res.json({ ...payload, servedFrom: "db" });
-        return;
-      }
-    }
-    throw err;
-  }
+  const payload = buildPayload(lyrics);
+  await cacheSet(`lyrics:${songId}`, payload);
+  res.status(201).json({ ...payload, servedFrom: result.source });
 };
 
 export const upsertLyrics = async (req: AuthRequest, res: Response): Promise<void> => {
