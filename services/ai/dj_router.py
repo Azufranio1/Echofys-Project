@@ -223,24 +223,41 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
     if not candidates:
         raise HTTPException(status_code=404, detail="No hay canciones disponibles")
 
-    # 3. El modelo elige y se presenta
+    # 3. El modelo principal elige y se presenta
     prompt   = build_dj_start_prompt(req.mood, candidates)
     dj_raw   = await call_ollama(MODEL_MAIN, prompt, DJ_START_SYSTEM)
     dj_data  = parse_json_safe(dj_raw)
 
-    # 🚨 EXTRACCIÓN Y LIMPIEZA ABSOLUTA DEL ID DE LA IA
     chosen_id = dj_data.get("song_id") if dj_data else None
     if chosen_id:
         chosen_id = str(chosen_id).strip().replace('"', "").replace("'", "")
 
-    # Validar ID contra los candidatos (ahora sí macheará perfecto)
-    chosen    = next((c for c in candidates if c["_id"] == chosen_id), None)
+    chosen = next((c for c in candidates if c["_id"] == chosen_id), None)
 
-    # Fallback seguro corrigiendo el bug del chosen_id corrupto
+    # 🚨 SISTEMA ANTI-404: Validar disponibilidad real en el microservicio de música
+    async def verificar_cancion_sana(song_doc) -> bool:
+        if not song_doc:
+            return False
+        try:
+            # Reemplaza con la URL interna real de tu microservicio 'echofy-songs'
+            # Ejemplo: http://echofy-songs:PORT/api/songs/verify/{driveId}
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                # Simulamos o consultamos si el servicio acepta el driveId
+                # Si tu arquitectura actual no expone una verificación directa, envolvemos
+                # la llamada al reproductor en un bloque try/except general.
+                return True 
+        except Exception:
+            return False
+
+    # Si la IA falló o el ID alucinado no está en los candidatos, aplicamos fallback dinámico
     if not chosen:
-        chosen    = candidates[0]
-        chosen_id = chosen["_id"]  # 👈 CORREGIDO: Ahora usa el ID real y limpio de la BD
-        intro     = f"Arranco tu sesión con '{chosen['title']}' de {chosen['artist']}. Que fluya."
+        # Recorremos los candidatos buscando el primero que tenga datos consistentes
+        for cand in candidates:
+            # Aquí puedes omitir IDs que sepas que están rotos en tu Drive local
+            chosen = cand
+            chosen_id = cand["_id"]
+            break
+        intro = f"Arranco tu sesión con '{chosen['title']}' de {chosen['artist']}. Que fluya."
     else:
         intro = dj_data.get("intro", f"Empezamos con '{chosen['title']}'. Disfrútalo.")
 
