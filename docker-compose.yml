@@ -133,19 +133,27 @@ services:
       - ./services/ingestor/.env
     restart: unless-stopped
 
-# ── AI ─────────────────────────────────────────────
-
+# ── AI DJ SERVICE 8090 ─────────────────────────────────
   ai:
     build: ./services/ai
     container_name: echofy-ai
     ports:
-      - "8090:3000"  # Mapea el puerto 8090 hacia afuera para que el frontend lo encuentre
+      - "8090:8090"
     volumes:
       - ./services/ai:/app
     env_file:
       - ./services/ai/.env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
+      - ollama  # ← Le decimos a la IA que espere a que Ollama encienda
+    restart: unless-stopped
+
+  # ── OLLAMA (Modelos de IA en Contenedor) ───────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: echofy-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama  # ← Para que los modelos no se borren al apagar el contenedor
     restart: unless-stopped
