@@ -139,7 +139,7 @@ services:
     build: ./services/ai
     container_name: echofy-ai
     ports:
-      - "8090:8090"  # Mapea el puerto 8090 hacia afuera para que el frontend lo encuentre
+      - "8090:3000"  # Mapea el puerto 8090 hacia afuera para que el frontend lo encuentre
     volumes:
       - ./services/ai:/app
     env_file:
