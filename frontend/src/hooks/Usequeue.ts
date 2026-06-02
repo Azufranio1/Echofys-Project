@@ -37,7 +37,7 @@ export const useQueue = () => {
   const loadQueue = useCallback(async (songId: string) => {
     setLoading(true);
     try {
-      const res  = await fetch(`${BASE}/next?songId=${songId}`, { headers: authHeaders() });
+      const res  = await fetch(`${BASE}/next?songId=${songId?.toString() ?? songId}`, { headers: authHeaders() });
       const data = await res.json();
       setQueue(data.queue  ?? []);
       setMeta(data.meta    ?? null);
