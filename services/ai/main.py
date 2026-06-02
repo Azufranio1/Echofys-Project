@@ -100,7 +100,7 @@ async def get_recent(user_id: str, limit: int = 10) -> list:
 
 async def call_ollama(model: str, prompt: str, system: str = "") -> str:
     """Llama a Ollama y devuelve la respuesta como texto limpio."""
-    payload = {"model": model, "prompt": prompt, "stream": False}
+    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json"}
     if system:
         payload["system"] = system
 

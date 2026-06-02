@@ -59,7 +59,8 @@ def decode_token(raw: str) -> dict:
 
 
 async def call_ollama(model: str, prompt: str, system: str = "") -> str:
-    payload = {"model": model, "prompt": prompt, "stream": False}
+    # 🚨 Forzamos format="json" por defecto para que los prompts estructurados no fallen
+    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json"}
     if system:
         payload["system"] = system
     async with httpx.AsyncClient(timeout=None) as c:
@@ -196,16 +197,10 @@ class DJNextRequest(BaseModel):
 
 @dj_router.post("/start")
 async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
-    """
-    Inicia una sesión DJ.
-    1. Clasifica el mood con el modelo ligero
-    2. Obtiene candidatas según el mood
-    3. El modelo principal elige la primera canción y se presenta
-    """
     payload = decode_token(authorization)
     user_id = payload.get("id")
 
-    # 1. Clasificar mood (modelo ligero ~2s)
+    # 1. Clasificar mood
     mood_raw  = await call_ollama(MODEL_LIGHT, build_mood_prompt(req.mood), DJ_MOOD_SYSTEM)
     mood_data = parse_json_safe(mood_raw) or {
         "mood":          req.mood,
@@ -228,19 +223,23 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
     if not candidates:
         raise HTTPException(status_code=404, detail="No hay canciones disponibles")
 
-    # 3. El modelo principal elige y se presenta (modelo principal ~5-10s)
+    # 3. El modelo elige y se presenta
     prompt   = build_dj_start_prompt(req.mood, candidates)
     dj_raw   = await call_ollama(MODEL_MAIN, prompt, DJ_START_SYSTEM)
     dj_data  = parse_json_safe(dj_raw)
 
-    # Validar que el song_id devuelto existe en los candidatos
+    # 🚨 EXTRACCIÓN Y LIMPIEZA ABSOLUTA DEL ID DE LA IA
     chosen_id = dj_data.get("song_id") if dj_data else None
+    if chosen_id:
+        chosen_id = str(chosen_id).strip().replace('"', "").replace("'", "")
+
+    # Validar ID contra los candidatos (ahora sí macheará perfecto)
     chosen    = next((c for c in candidates if c["_id"] == chosen_id), None)
 
-    # Fallback si el modelo devolvió un ID inválido
+    # Fallback seguro corrigiendo el bug del chosen_id corrupto
     if not chosen:
         chosen    = candidates[0]
-        chosen_id = chosen["_id"]
+        chosen_id = chosen["_id"]  # 👈 CORREGIDO: Ahora usa el ID real y limpio de la BD
         intro     = f"Arranco tu sesión con '{chosen['title']}' de {chosen['artist']}. Que fluya."
     else:
         intro = dj_data.get("intro", f"Empezamos con '{chosen['title']}'. Disfrútalo.")
@@ -270,16 +269,8 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
         },
     }
 
-
 @dj_router.post("/next")
 async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
-    """
-    Genera la siguiente canción de la sesión DJ.
-    1. Lee la sesión activa
-    2. Registra la señal de comportamiento
-    3. Ajusta el energy_target según la señal
-    4. El modelo elige la siguiente y genera la transición
-    """
     payload = decode_token(authorization)
     user_id = payload.get("id")
 
@@ -291,7 +282,7 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
             detail="No hay sesión DJ activa. Inicia una con /dj/start"
         )
 
-    # 2. Obtener canción anterior de Mongo para tener todos sus datos
+    # 2. Obtener canción anterior
     try:
         prev_doc = await songs_col.find_one(
             {"_id": ObjectId(req.current_song_id)},
@@ -302,18 +293,17 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
     except Exception:
         prev_song = session.get("current_song", {})
 
-    # 3. Ajustar energy_target según señal de comportamiento
+    # 3. Ajustar energía
     energy_target = session.get("energy_target", 5)
     if req.listen_signal == "completed":
-        energy_target = min(9, energy_target + 1)   # le gustó → subir un escalón
+        energy_target = min(9, energy_target + 1)
     elif req.listen_signal == "skipped_early":
-        energy_target = max(1, energy_target - 1)   # no enganchó → bajar
-    # "skipped_mid" → mantener
+        energy_target = max(1, energy_target - 1)
 
-    # 4. Obtener letra de la canción anterior (contexto para el DJ)
+    # 4. Obtener letra anterior
     lyrics_snippet = await get_lyrics_snippet(req.current_song_id)
 
-    # 5. Obtener candidatas excluyendo ya reproducidas
+    # 5. Obtener candidatas
     played_ids = session.get("played_ids", [])
     candidates = await get_candidates(
         exclude_ids=played_ids,
@@ -322,7 +312,6 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
         limit=25,
     )
 
-    # Si ya reprodujo todo el catálogo, resetear played_ids (mantener solo la actual)
     if not candidates:
         played_ids = [req.current_song_id]
         candidates = await get_candidates(
@@ -335,7 +324,7 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
     if not candidates:
         raise HTTPException(status_code=404, detail="No hay más canciones disponibles")
 
-    # 6. El modelo elige la siguiente y genera transición (modelo principal ~5-10s)
+    # 6. El modelo elige la siguiente
     prompt  = build_dj_next_prompt(
         prev_song      = prev_song,
         listen_signal  = req.listen_signal,
@@ -346,14 +335,17 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
     dj_raw  = await call_ollama(MODEL_MAIN, prompt, DJ_NEXT_SYSTEM)
     dj_data = parse_json_safe(dj_raw)
 
-    # Validar song_id devuelto
+    # 🚨 EXTRACCIÓN Y LIMPIEZA ABSOLUTA DEL ID DE LA IA EN NEXT
     chosen_id  = dj_data.get("song_id") if dj_data else None
+    if chosen_id:
+        chosen_id = str(chosen_id).strip().replace('"', "").replace("'", "")
+
     chosen     = next((c for c in candidates if c["_id"] == chosen_id), None)
 
-    # Fallback si el ID no es válido
+    # Fallback seguro corrigiendo el bug del chosen_id corrupto
     if not chosen:
-        chosen    = candidates[0]
-        chosen_id = chosen["_id"]
+        chosen     = candidates[0]
+        chosen_id  = chosen["_id"]  # 👈 CORREGIDO: Usamos el ID limpio real de la BD
         transition = f"Seguimos con '{chosen['title']}' de {chosen['artist']}."
         energy_delta = "same"
     else:
@@ -370,7 +362,6 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
         "signal":  req.listen_signal,
         "title":   chosen["title"],
     })
-    # Limitar historial de sesión a 50 entradas
     if len(session["history"]) > 50:
         session["history"] = session["history"][-50:]
 
