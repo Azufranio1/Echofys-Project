@@ -118,3 +118,32 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+
+# ── INGESTOR ──────────────────────────────────────
+
+  ingestor:
+  build: ./services/ingestor
+  container_name: echofy-ingestor
+  # Sin ports: solo accesible internamente
+  volumes:
+    - ./services/ingestor:/app
+    - ./services/ingestor/downloads:/app/downloads
+    - ./services/ingestor/service-account.json:/app/service-account.json
+  env_file:
+    - ./services/ingestor/.env
+  restart: unless-stopped
+
+# ── AI ─────────────────────────────────────────────
+
+  ai:
+    build: ./services/ai
+    container_name: echofy-ai
+    ports:
+      - "8090:8090"  # Mapea el puerto 8090 hacia afuera para que el frontend lo encuentre
+    volumes:
+      - ./services/ai:/app
+    env_file:
+      - ./services/ai/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
