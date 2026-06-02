@@ -164,4 +164,3 @@ services:
               count: all
               capabilities: [gpu]
     restart: unless-stopped
-    restart: unless-stopped
