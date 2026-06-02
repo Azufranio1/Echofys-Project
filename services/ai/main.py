@@ -23,7 +23,7 @@ from typing import Optional
 import httpx
 import redis.asyncio as aioredis
 import motor.motor_asyncio
-import json, os, re, PyJWT 
+import json, os, re, pyjwt 
 from dotenv import load_dotenv
 
 from dj_router import dj_router
