@@ -164,3 +164,14 @@ services:
               count: all
               capabilities: [gpu]
     restart: unless-stopped
+
+  redis-ai:
+    image: redis:7-alpine
+    container_name: redis-ai
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - echofy-network # Asegúrate de que use la misma red que tus otros contenedores
