@@ -62,7 +62,7 @@ async def call_ollama(model: str, prompt: str, system: str = "") -> str:
     payload = {"model": model, "prompt": prompt, "stream": False}
     if system:
         payload["system"] = system
-    async with httpx.AsyncClient(timeout=120.0) as c:
+    async with httpx.AsyncClient(timeout=None) as c:
         r = await c.post(f"{OLLAMA_URL}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()["response"].strip()
