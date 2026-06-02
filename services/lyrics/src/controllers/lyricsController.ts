@@ -2,7 +2,7 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { Lyrics } from "../models/Lyrics";
 import redis from "../lib/redis";
-import { fetchFromLrclib } from "../lib/lrclibClient";
+import { fetchLyricsFromAllProviders } from "../lib/lyricsProviders";
 
 const CACHE_TTL = 60 * 60 * 24 * 7;
 
@@ -60,7 +60,7 @@ export const getLyrics = async (req: AuthRequest, res: Response): Promise<void> 
 
   res.status(404).json({
     error: "Sin letras",
-    hint: "Usa POST /lyrics/:songId/fetch para buscar en LRCLIB",
+    hint: "Usa POST /lyrics/:songId/fetch para buscar automáticamente",
   });
 };
 
@@ -81,26 +81,26 @@ export const fetchAndSaveLyrics = async (req: AuthRequest, res: Response): Promi
     return;
   }
 
-  const result = await fetchFromLrclib({ trackName, artistName, albumName, duration });
+  const result = await fetchLyricsFromAllProviders({ trackName, artistName, albumName, duration });
 
   if (!result) {
-    res.status(404).json({ error: "No encontrado en LRCLIB", hint: "Sube letras manualmente con PUT /lyrics/:songId" });
+    res.status(404).json({ error: "No encontrado en ninguna fuente", hint: "Sube letras manualmente con PUT /lyrics/:songId" });
     return;
   }
 
   const lyrics = await Lyrics.create({
     songId, trackName, artistName,
-    albumName: result.albumName || albumName,
-    durationSeconds: result.duration || duration,
+    albumName,
+    durationSeconds: duration,
     plainLyrics:  result.plainLyrics  ?? undefined,
     syncedLyrics: result.syncedLyrics ?? undefined,
-    source: "lrclib",
+    source:       result.source === "manual" ? "manual" : "lrclib",
     instrumental: result.instrumental,
   });
 
   const payload = buildPayload(lyrics);
   await cacheSet(`lyrics:${songId}`, payload);
-  res.status(201).json({ ...payload, servedFrom: "lrclib" });
+  res.status(201).json({ ...payload, servedFrom: result.source });
 };
 
 export const upsertLyrics = async (req: AuthRequest, res: Response): Promise<void> => {

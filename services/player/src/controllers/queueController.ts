@@ -38,7 +38,7 @@ export const getNextQueue = async (req: Request, res: Response) => {
     const { songId } = req.query as { songId: string };
     if (!songId) return res.status(400).json({ message: 'songId requerido' });
 
-    const current = await Music.findById(songId);
+    const current = await Music.findById(songId?.toString());
     if (!current) return res.status(404).json({ message: 'Canción no encontrada' });
 
     const { artist, genre, _id: currentId } = current as any;

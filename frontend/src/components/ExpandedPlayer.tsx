@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ChevronDown, Music2, Play, Pause, SkipBack, SkipForward,
          Volume2, VolumeX, Download, Users, Mic2, Clock, Compass,
-         AlignLeft, ListMusic, Loader2 } from 'lucide-react';
+         AlignLeft, ListMusic, Loader2, Disc3, Send, X, Maximize2 } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import HeartButton from './HeartButton';
 import type { QueueMeta } from '../hooks/useQueue';
@@ -14,6 +14,7 @@ interface Props {
   onClose: () => void;
   onSelectSong: (song: any) => void;
   onDownload: () => void;
+  onFullscreen: () => void;
   currentTime: number;
   duration: number;
   isMuted: boolean;
@@ -23,6 +24,13 @@ interface Props {
   onToggleMute: () => void;
   onSkipBack: () => void;
   onSkipForward: () => void;
+  // DJ props
+  djMode: boolean;
+  djNarration: string;       // última frase del DJ
+  djMood: string;            // mood clasificado
+  djLoading: boolean;
+  onDJStart: (mood: string) => void;
+  onDJEnd: () => void;
 }
 
 interface LyricLine { time: number; text: string; }
@@ -35,7 +43,7 @@ type LyricsState =
   | { status: 'none' }
   | { status: 'error' };
 
-type Tab = 'lyrics' | 'queue';
+type Tab = 'lyrics' | 'queue' | 'dj';
 
 const fmt = (t: number) => {
   if (!t || isNaN(t) || !isFinite(t)) return '0:00';
@@ -52,6 +60,15 @@ const SECTION_LABELS = [
   { icon: Clock,   label: 'Escuchado antes', color: '#34d399' },
   { icon: Compass, label: 'Explorar',        color: '#f59e0b' },
   { icon: Compass, label: 'Explorar',        color: '#f59e0b' },
+];
+
+const MOOD_SUGGESTIONS = [
+  'Estoy programando 💻',
+  'Quiero energía 🔥',
+  'Momento relax 🌙',
+  'Haciendo ejercicio 💪',
+  'Concentración total 🎯',
+  'Algo nostálgico 🌧️',
 ];
 
 function parseLrc(lrc: string): LyricLine[] {
@@ -84,54 +101,47 @@ function useLyrics(song: any) {
   const load = useCallback(async (s: any) => {
     if (!s?._id) return;
     setState({ status: 'loading' });
+    try {
+      const res = await fetch(`${API.lyrics}/${s._id}`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.hasSyncedLyrics && data.syncedLyrics) {
+          setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
+          return;
+        }
+        if (data.hasPlainLyrics && data.plainLyrics) {
+          setState({ status: 'plain', text: data.plainLyrics });
+          return;
+        }
+        if (data.instrumental) { setState({ status: 'none' }); return; }
+      }
+      if (res.status !== 404) { setState({ status: 'none' }); return; }
 
-   try {
-  const res = await fetch(`${API.lyrics}/${s._id}`, { headers: authHeaders() });
-  if (res.ok) {
-    const data = await res.json();
-    if (data.hasSyncedLyrics && data.syncedLyrics) {
-      setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
-      return;
+      const fetchRes = await fetch(`${API.lyrics}/${s._id}/fetch`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          trackName:  s.title,
+          artistName: s.artist,
+          albumName:  s.album,
+          duration:   s.durationSeconds,
+        }),
+      });
+      if (fetchRes.ok) {
+        const data = await fetchRes.json();
+        if (data.hasSyncedLyrics && data.syncedLyrics) {
+          setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
+          return;
+        }
+        if (data.hasPlainLyrics && data.plainLyrics) {
+          setState({ status: 'plain', text: data.plainLyrics });
+          return;
+        }
+      }
+      setState({ status: 'none' });
+    } catch {
+      setState({ status: 'error' });
     }
-    if (data.hasPlainLyrics && data.plainLyrics) {
-      setState({ status: 'plain', text: data.plainLyrics });
-      return;
-    }
-    if (data.instrumental) { setState({ status: 'none' }); return; }
-  }
-
-  if (res.status !== 404) {
-    setState({ status: 'none' });
-    return;
-  }
-
-  // Solo llega aquí si fue 404 → buscar en LRCLIB
-  const fetchRes = await fetch(`${API.lyrics}/${s._id}/fetch`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      trackName:  s.title,
-      artistName: s.artist,
-      albumName:  s.album,
-      duration:   s.durationSeconds,
-    }),
-  });
-
-  if (fetchRes.ok) {
-    const data = await fetchRes.json();
-    if (data.hasSyncedLyrics && data.syncedLyrics) {
-      setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
-      return;
-    }
-    if (data.hasPlainLyrics && data.plainLyrics) {
-      setState({ status: 'plain', text: data.plainLyrics });
-      return;
-    }
-  }
-  setState({ status: 'none' });
-} catch {
-  setState({ status: 'error' });
-}
   }, []);
 
   useEffect(() => {
@@ -144,10 +154,271 @@ function useLyrics(song: any) {
   return state;
 }
 
+// ══════════════════════════════════════════════════════
+//  Sub-componente: Pestaña DJ
+// ══════════════════════════════════════════════════════
+interface DJTabProps {
+  djMode:      boolean;
+  djNarration: string;
+  djMood:      string;
+  djLoading:   boolean;
+  onDJStart:   (mood: string) => void;
+  onDJEnd:     () => void;
+  currentSong: any;
+}
+
+const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, currentSong }: DJTabProps) => {
+  const [moodInput, setMoodInput] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleStart = () => {
+    const mood = moodInput.trim();
+    if (!mood) return;
+    onDJStart(mood);
+    setMoodInput('');
+  };
+
+  const handleSuggestion = (s: string) => {
+    onDJStart(s);
+  };
+
+  return (
+    <>
+      <style>{`
+        .dj-wrap { flex:1; display:flex; flex-direction:column; gap:14px; overflow-y:auto; padding-right:4px; min-height:0; }
+        .dj-wrap::-webkit-scrollbar { width:3px; }
+        .dj-wrap::-webkit-scrollbar-thumb { background:rgba(139,92,246,0.3); border-radius:2px; }
+
+        .dj-session-header {
+          display:flex; align-items:center; justify-content:space-between;
+          padding:10px 14px; border-radius:12px;
+          background:rgba(139,92,246,0.1); border:1px solid rgba(139,92,246,0.25);
+        }
+        .dj-session-info { display:flex; align-items:center; gap:8px; }
+        .dj-session-dot {
+          width:8px; height:8px; border-radius:50%; background:#a78bfa;
+          animation:djPulse 1.5s ease-in-out infinite;
+        }
+        @keyframes djPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.7)} }
+        .dj-session-label { font-size:11px; font-weight:700; color:#c4b5fd; font-family:'Sora',sans-serif; }
+        .dj-session-mood  { font-size:10px; color:rgba(255,255,255,0.4); font-family:'Sora',sans-serif; }
+        .dj-end-btn {
+          background:none; border:1px solid rgba(255,255,255,0.1); border-radius:8px;
+          padding:5px 10px; cursor:pointer; color:rgba(255,255,255,0.4);
+          font-family:'Sora',sans-serif; font-size:10px; font-weight:600;
+          display:flex; align-items:center; gap:5px; transition:all 0.2s;
+        }
+        .dj-end-btn:hover { color:#fca5a5; border-color:rgba(252,165,165,0.3); background:rgba(252,165,165,0.07); }
+
+        .dj-narration-wrap { display:flex; gap:10px; align-items:flex-start; }
+        .dj-avatar {
+          width:34px; height:34px; border-radius:50%; flex-shrink:0;
+          background:linear-gradient(135deg,#9b72f5,#6d28d9);
+          display:flex; align-items:center; justify-content:center;
+          box-shadow:0 0 14px rgba(139,92,246,0.4);
+        }
+        .dj-bubble {
+          flex:1; padding:12px 14px; border-radius:0 12px 12px 12px;
+          background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08);
+          font-size:13px; font-weight:500; color:rgba(255,255,255,0.85);
+          font-family:'Sora',sans-serif; line-height:1.55;
+          animation:bubbleIn 0.3s cubic-bezier(0.16,1,0.3,1);
+        }
+        @keyframes bubbleIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+        .dj-now-playing {
+          display:flex; align-items:center; gap:10px; padding:10px 12px;
+          border-radius:10px; background:rgba(255,255,255,0.03);
+          border:1px solid rgba(255,255,255,0.06);
+        }
+        .dj-now-art { width:40px; height:40px; border-radius:8px; overflow:hidden; flex-shrink:0; background:linear-gradient(135deg,#1a1030,#2d1a5e); display:flex; align-items:center; justify-content:center; }
+        .dj-now-art img { width:100%; height:100%; object-fit:cover; }
+        .dj-now-info { flex:1; min-width:0; }
+        .dj-now-title  { font-size:12px; font-weight:700; color:#a78bfa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'Sora',sans-serif; }
+        .dj-now-artist { font-size:10px; color:rgba(255,255,255,0.4); font-family:'Sora',sans-serif; }
+        .dj-now-badge  { font-size:9px; font-weight:700; letter-spacing:0.08em; padding:2px 8px; border-radius:20px; background:rgba(139,92,246,0.15); color:#a78bfa; border:1px solid rgba(139,92,246,0.3); white-space:nowrap; }
+
+        .dj-loading {
+          display:flex; align-items:center; gap:10px; padding:12px 14px;
+          border-radius:12px; background:rgba(255,255,255,0.03);
+          border:1px solid rgba(255,255,255,0.06);
+        }
+        .dj-loading-dots { display:flex; gap:4px; align-items:center; }
+        .dj-dot { width:6px; height:6px; border-radius:50%; background:#a78bfa; animation:dotBounce 1.2s ease-in-out infinite; }
+        .dj-dot:nth-child(2) { animation-delay:0.2s; }
+        .dj-dot:nth-child(3) { animation-delay:0.4s; }
+        @keyframes dotBounce { 0%,80%,100%{transform:scale(0.6);opacity:0.4} 40%{transform:scale(1);opacity:1} }
+        .dj-loading-text { font-size:11px; color:rgba(255,255,255,0.35); font-family:'Sora',sans-serif; }
+
+        .dj-input-section { display:flex; flex-direction:column; gap:10px; }
+        .dj-input-label { font-size:10px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:rgba(255,255,255,0.3); font-family:'Sora',sans-serif; }
+        .dj-input-row { display:flex; gap:8px; }
+        .dj-input {
+          flex:1; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+          border-radius:10px; padding:10px 14px; color:white; outline:none;
+          font-family:'Sora',sans-serif; font-size:13px; transition:all 0.2s;
+        }
+        .dj-input::placeholder { color:rgba(255,255,255,0.25); }
+        .dj-input:focus { border-color:rgba(139,92,246,0.5); background:rgba(139,92,246,0.07); box-shadow:0 0 0 3px rgba(139,92,246,0.1); }
+        .dj-send-btn {
+          width:40px; height:40px; border-radius:10px; border:none; cursor:pointer;
+          background:linear-gradient(135deg,#9b72f5,#6d28d9); color:white;
+          display:flex; align-items:center; justify-content:center;
+          transition:transform 0.15s, box-shadow 0.2s;
+          box-shadow:0 4px 12px rgba(109,40,217,0.4);
+          flex-shrink:0;
+        }
+        .dj-send-btn:hover { transform:scale(1.06); }
+        .dj-send-btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+
+        .dj-suggestions { display:flex; flex-wrap:wrap; gap:6px; }
+        .dj-suggestion {
+          padding:5px 11px; border-radius:20px; border:1px solid rgba(255,255,255,0.1);
+          background:rgba(255,255,255,0.04); color:rgba(255,255,255,0.5);
+          font-family:'Sora',sans-serif; font-size:11px; cursor:pointer;
+          transition:all 0.18s;
+        }
+        .dj-suggestion:hover { background:rgba(139,92,246,0.12); border-color:rgba(139,92,246,0.3); color:#c4b5fd; }
+
+        .dj-empty { display:flex; flex-direction:column; align-items:center; gap:12px; padding:20px 0; text-align:center; }
+        .dj-empty-icon { width:56px; height:56px; border-radius:16px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.15); display:flex; align-items:center; justify-content:center; }
+        .dj-empty-title { font-size:14px; font-weight:700; color:rgba(255,255,255,0.5); margin:0; font-family:'Sora',sans-serif; }
+        .dj-empty-sub   { font-size:12px; color:rgba(255,255,255,0.25); margin:0; font-family:'Sora',sans-serif; max-width:220px; line-height:1.5; }
+      `}</style>
+
+      <div className="dj-wrap">
+        {djMode && (
+          <>
+            <div className="dj-session-header">
+              <div className="dj-session-info">
+                <div className="dj-session-dot"/>
+                <div>
+                  <div className="dj-session-label">Sesión DJ activa</div>
+                  {djMood && <div className="dj-session-mood">{djMood}</div>}
+                </div>
+              </div>
+              <button className="dj-end-btn" onClick={onDJEnd}>
+                <X size={12}/> Terminar
+              </button>
+            </div>
+
+            {currentSong && (
+              <div className="dj-now-playing">
+                <div className="dj-now-art">
+                  {currentSong.artwork
+                    ? <img src={currentSong.artwork} alt={currentSong.title}/>
+                    : <Music2 size={16} color="rgba(139,92,246,0.5)"/>
+                  }
+                </div>
+                <div className="dj-now-info">
+                  <div className="dj-now-title">{currentSong.title}</div>
+                  <div className="dj-now-artist">{currentSong.artist}</div>
+                </div>
+                <span className="dj-now-badge">▶ DJ</span>
+              </div>
+            )}
+
+            {djLoading && (
+              <div className="dj-loading">
+                <div className="dj-loading-dots">
+                  <div className="dj-dot"/>
+                  <div className="dj-dot"/>
+                  <div className="dj-dot"/>
+                </div>
+                <span className="dj-loading-text">El DJ está eligiendo la siguiente pista...</span>
+              </div>
+            )}
+
+            {djNarration && !djLoading && (
+              <div className="dj-narration-wrap">
+                <div className="dj-avatar">
+                  <Disc3 size={16} color="white" style={{animation:'spin-l 3s linear infinite'}}/>
+                </div>
+                <div className="dj-bubble">{djNarration}</div>
+              </div>
+            )}
+          </>
+        )}
+
+        {!djMode && (
+          <>
+            <div className="dj-empty">
+              <div className="dj-empty-icon">
+                <Disc3 size={26} color="rgba(139,92,246,0.5)"/>
+              </div>
+              <p className="dj-empty-title">Modo DJ</p>
+              <p className="dj-empty-sub">
+                Cuéntame cómo estás o qué quieres escuchar y seré tu DJ personal.
+              </p>
+            </div>
+
+            <div className="dj-input-section">
+              <div className="dj-input-label">¿Cómo estás ahora?</div>
+              <div className="dj-input-row">
+                <input
+                  ref={inputRef}
+                  className="dj-input"
+                  placeholder="Estoy programando, quiero energía..."
+                  value={moodInput}
+                  onChange={e => setMoodInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleStart()}
+                  disabled={djLoading}
+                />
+                <button
+                  className="dj-send-btn"
+                  onClick={handleStart}
+                  disabled={djLoading || !moodInput.trim()}
+                >
+                  {djLoading ? <Loader2 size={16} style={{animation:'spin-l 0.8s linear infinite'}}/> : <Send size={16}/>}
+                </button>
+              </div>
+
+              <div className="dj-suggestions">
+                {MOOD_SUGGESTIONS.map(s => (
+                  <button key={s} className="dj-suggestion" onClick={() => handleSuggestion(s)} disabled={djLoading}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {djMode && !djLoading && (
+          <div className="dj-input-section">
+            <div className="dj-input-label">Cambiar el ambiente</div>
+            <div className="dj-input-row">
+              <input
+                className="dj-input"
+                placeholder="Dime qué quieres ahora..."
+                value={moodInput}
+                onChange={e => setMoodInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && moodInput.trim()) { onDJStart(moodInput.trim()); setMoodInput(''); }}}
+              />
+              <button
+                className="dj-send-btn"
+                onClick={() => { if (moodInput.trim()) { onDJStart(moodInput.trim()); setMoodInput(''); }}}
+                disabled={!moodInput.trim()}
+              >
+                <Send size={16}/>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      <style>{`@keyframes spin-l { to { transform:rotate(360deg); } }`}</style>
+    </>
+  );
+};
+
+// ══════════════════════════════════════════════════════
+//  ExpandedPlayer principal
+// ══════════════════════════════════════════════════════
 const ExpandedPlayer = ({
-  song, queue, queueMeta, onClose, onSelectSong, onDownload,
+  song, queue, queueMeta, onClose, onSelectSong, onDownload, onFullscreen,
   currentTime, duration, isMuted, volume,
   onSeek, onVolumeChange, onToggleMute, onSkipBack, onSkipForward,
+  djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd,
 }: Props) => {
   const { isPlaying, togglePlay } = usePlayerStore();
   const prog       = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -157,7 +428,7 @@ const ExpandedPlayer = ({
   const lyricsState   = useLyrics(song);
   const activeLine    = useActiveLine(
     lyricsState.status === 'synced' ? lyricsState.lines : [],
-    currentTime
+    currentTime,
   );
 
   const activeRef = useRef<HTMLDivElement>(null);
@@ -173,6 +444,10 @@ const ExpandedPlayer = ({
       behavior: 'smooth',
     });
   }, [activeLine, lyricsState.status]);
+
+  useEffect(() => {
+    if (djMode) setTab('dj');
+  }, [djMode]);
 
   return (
     <>
@@ -198,10 +473,16 @@ const ExpandedPlayer = ({
         .exp-meta-key { font-size:9px; font-weight:700; letter-spacing:0.12em; color:rgba(255,255,255,0.3); text-transform:uppercase; }
         .exp-meta-val { font-size:11px; font-weight:500; color:rgba(255,255,255,0.75); text-align:right; margin-left:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:150px; }
         .exp-center { flex:1; min-width:0; display:flex; flex-direction:column; max-height:100%; min-height:0; }
-        .exp-tabs { display:flex; gap:4px; flex-shrink:0; margin-bottom:14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:3px; width:fit-content; }
-        .exp-tab { display:flex; align-items:center; gap:6px; padding:6px 14px; border-radius:7px; border:none; cursor:pointer; font-size:11px; font-weight:700; letter-spacing:0.05em; font-family:'Sora',sans-serif; transition:all 0.18s; color:rgba(255,255,255,0.35); background:transparent; }
+
+        .exp-tabs { display:flex; gap:3px; flex-shrink:0; margin-bottom:14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07); border-radius:10px; padding:3px; width:fit-content; }
+        .exp-tab { display:flex; align-items:center; gap:5px; padding:6px 12px; border-radius:7px; border:none; cursor:pointer; font-size:11px; font-weight:700; letter-spacing:0.04em; font-family:'Sora',sans-serif; transition:all 0.18s; color:rgba(255,255,255,0.35); background:transparent; }
         .exp-tab:hover { color:rgba(255,255,255,0.65); }
         .exp-tab.active { background:rgba(139,92,246,0.2); color:#c4b5fd; border:1px solid rgba(139,92,246,0.3); }
+        .exp-tab.dj-active { background:linear-gradient(135deg,rgba(155,114,245,0.25),rgba(109,40,217,0.2)); color:#c4b5fd; border:1px solid rgba(139,92,246,0.4); }
+
+        .dj-tab-dot { width:6px; height:6px; border-radius:50%; background:#a78bfa; animation:djPulse2 1.5s ease-in-out infinite; flex-shrink:0; }
+        @keyframes djPulse2 { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
         .exp-lyrics-scroll { flex:1; min-height:0; overflow-y:auto; padding-right:6px; mask-image:linear-gradient(to bottom,transparent 0%,black 8%,black 88%,transparent 100%); -webkit-mask-image:linear-gradient(to bottom,transparent 0%,black 8%,black 88%,transparent 100%); }
         .exp-lyrics-scroll::-webkit-scrollbar { width:3px; }
         .exp-lyrics-scroll::-webkit-scrollbar-thumb { background:rgba(139,92,246,0.3); border-radius:2px; }
@@ -217,6 +498,7 @@ const ExpandedPlayer = ({
         .exp-lyrics-state p { margin:0; font-family:'Sora',sans-serif; }
         .exp-lyrics-state .ls-title { font-size:13px; font-weight:700; color:rgba(255,255,255,0.4); }
         .exp-lyrics-state .ls-sub { font-size:11px; color:rgba(255,255,255,0.2); margin-top:4px; }
+
         .exp-queue-label { font-size:10px; font-weight:700; letter-spacing:0.2em; color:rgba(255,255,255,0.3); text-transform:uppercase; margin-bottom:10px; flex-shrink:0; }
         .exp-queue-list { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:3px; padding-right:4px; min-height:0; }
         .exp-queue-list::-webkit-scrollbar { width:3px; }
@@ -229,6 +511,7 @@ const ExpandedPlayer = ({
         .exp-queue-title { font-size:12px; font-weight:600; color:white; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:1px; }
         .exp-queue-artist { font-size:10px; color:rgba(255,255,255,0.3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .exp-queue-tag { font-size:9px; font-weight:600; padding:2px 6px; border-radius:20px; white-space:nowrap; flex-shrink:0; }
+
         .exp-bar { position:relative; z-index:10; flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:0 24px; height:80px; background:rgba(5,5,14,0.92); backdrop-filter:blur(20px); }
         .exp-bar::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,rgba(139,92,246,0.5) 20%,rgba(192,168,255,0.8) 50%,rgba(139,92,246,0.5) 80%,transparent); }
         .exp-bar-song { display:flex; align-items:center; gap:10px; width:24%; min-width:0; }
@@ -255,10 +538,12 @@ const ExpandedPlayer = ({
         .exp-bar-icon { background:none; border:none; cursor:pointer; color:#4B5563; display:flex; align-items:center; transition:color 0.15s; padding:3px; }
         .exp-bar-icon:hover { color:#E5E7EB; }
         .exp-bar-icon.dl:hover { color:#10B981; }
+        .exp-bar-icon.fs:hover { color:#a78bfa; }
         .exp-vol-wrap { position:relative; width:72px; height:3px; cursor:pointer; border-radius:4px; }
         .exp-vol-wrap:hover .exp-thumb-dot { opacity:1; }
         @keyframes spin-l { to { transform:rotate(360deg); } }
         .spin { animation:spin-l 0.9s linear infinite; }
+
         @media (max-width:700px) {
           .exp-body { flex-direction:column; align-items:center; padding:16px 20px 0; gap:16px; overflow-y:auto; }
           .exp-left { width:100%; align-items:center; }
@@ -287,12 +572,13 @@ const ExpandedPlayer = ({
 
         <div className="exp-header">
           <button className="exp-close" onClick={onClose}><ChevronDown size={18}/></button>
-          <span className="exp-now-label">Reproduciendo ahora</span>
+          <span className="exp-now-label">
+            {djMode ? '🎛️ Modo DJ Activo' : 'Reproduciendo ahora'}
+          </span>
           <div style={{width:36}}/>
         </div>
 
         <div className="exp-body">
-
           <div className="exp-left">
             <div className="exp-artwork">
               {song.artwork
@@ -319,15 +605,23 @@ const ExpandedPlayer = ({
                 <AlignLeft size={12}/> Letras
               </button>
               <button className={`exp-tab ${tab==='queue'?'active':''}`} onClick={() => setTab('queue')}>
-                <ListMusic size={12}/> A continuación
+                <ListMusic size={12}/> Cola
                 {queue.length > 0 && (
                   <span style={{background:'rgba(139,92,246,0.25)',color:'#a78bfa',borderRadius:20,fontSize:9,padding:'1px 5px',marginLeft:2}}>
                     {queue.length}
                   </span>
                 )}
               </button>
+              <button
+                className={`exp-tab ${tab==='dj' ? (djMode ? 'dj-active' : 'active') : ''}`}
+                onClick={() => setTab('dj')}
+              >
+                {djMode && <div className="dj-tab-dot"/>}
+                <Disc3 size={12}/> DJ
+              </button>
             </div>
 
+            {/* ── Letras ── */}
             {tab === 'lyrics' && (
               <>
                 {lyricsState.status === 'loading' && (
@@ -373,6 +667,7 @@ const ExpandedPlayer = ({
               </>
             )}
 
+            {/* ── Cola ── */}
             {tab === 'queue' && (
               <>
                 <div className="exp-queue-label">
@@ -381,7 +676,7 @@ const ExpandedPlayer = ({
                 <div className="exp-queue-list">
                   {queue.length === 0 && (
                     <div style={{padding:'24px 0',textAlign:'center',color:'rgba(255,255,255,0.2)',fontSize:12}}>
-                      Generando recomendaciones...
+                      Generando recommendations...
                     </div>
                   )}
                   {queue.map((s, i) => {
@@ -404,6 +699,19 @@ const ExpandedPlayer = ({
                   })}
                 </div>
               </>
+            )}
+
+            {/* ── DJ ── */}
+            {tab === 'dj' && (
+              <DJTab
+                djMode={djMode}
+                djNarration={djNarration}
+                djMood={djMood}
+                djLoading={djLoading}
+                onDJStart={onDJStart}
+                onDJEnd={onDJEnd}
+                currentSong={song}
+              />
             )}
           </div>
         </div>
@@ -439,6 +747,9 @@ const ExpandedPlayer = ({
             </div>
           </div>
           <div className="exp-bar-right">
+            <button className="exp-bar-icon fs" onClick={onFullscreen} title="Pantalla completa">
+              <Maximize2 size={14}/>
+            </button>
             <button className="exp-bar-icon dl" onClick={onDownload} title="Descargar"><Download size={14}/></button>
             <button className="exp-bar-icon" onClick={onToggleMute}>
               {isMuted || volume===0 ? <VolumeX size={14}/> : <Volume2 size={14}/>}

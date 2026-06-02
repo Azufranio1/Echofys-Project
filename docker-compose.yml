@@ -118,3 +118,49 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
+
+# ── INGESTOR ──────────────────────────────────────
+
+  ingestor:
+    build: ./services/ingestor
+    container_name: echofy-ingestor
+    # Sin ports: solo accesible internamente
+    volumes:
+      - ./services/ingestor:/app
+      - ./services/ingestor/downloads:/app/downloads
+      - ./services/ingestor/service-account.json:/app/service-account.json
+    env_file:
+      - ./services/ingestor/.env
+    restart: unless-stopped
+
+# ── AI DJ SERVICE 8090 ─────────────────────────────────
+  ai:
+    build: ./services/ai
+    container_name: echofy-ai
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./services/ai:/app
+    env_file:
+      - ./services/ai/.env
+    depends_on:
+      - redis
+      - ollama
+    restart: unless-stopped
+
+  # ── OLLAMA CONTAINER ──────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: echofy-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
