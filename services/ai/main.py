@@ -98,9 +98,12 @@ async def get_recent(user_id: str, limit: int = 10) -> list:
     return data[:limit]
 
 
-async def call_ollama(model: str, prompt: str, system: str = "") -> str:
-    """Llama a Ollama y devuelve la respuesta como texto limpio."""
-    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json"}
+async def call_ollama(model: str, prompt: str, system: str = "", as_json: bool = False) -> str:
+    """Llama a Ollama y devuelve la respuesta limpia. Puede forzar formato JSON."""
+    payload = {"model": model, "prompt": prompt, "stream": False}
+    
+    if as_json:
+        payload["format"] = "json"
     if system:
         payload["system"] = system
 
@@ -142,16 +145,15 @@ async def classify_intent(message: str) -> dict:
             MODEL_LIGHT,
             f'Mensaje: "{message}"',
             INTENT_SYSTEM,
+            as_json=True,  # 👈 Activamos el modo JSON para el clasificador
         )
         # Limpiar posible markdown que el modelo añada
         raw = raw.strip().strip("```json").strip("```").strip()
-        # Extraer solo el JSON si hay texto extra
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         if match:
             raw = match.group(0)
         return json.loads(raw)
     except Exception:
-        # Fallback seguro si el modelo no devuelve JSON válido
         return {"intent": "chat", "query": message, "genre": None, "url": None}
 
 
