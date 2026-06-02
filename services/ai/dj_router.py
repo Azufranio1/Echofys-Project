@@ -58,18 +58,22 @@ def decode_token(raw: str) -> dict:
         raise HTTPException(status_code=401, detail="Token inválido")
 
 
-async def call_ollama(model: str, prompt: str, system: str = "") -> str:
-    # 🚨 Forzamos format="json" por defecto para que los prompts estructurados no fallen
-    payload = {"model": model, "prompt": prompt, "stream": False, "format": "json"}
+async def call_ollama(model: str, prompt: str, system: str = "", as_json: bool = False) -> str:
+    """Llama a Ollama y devuelve la respuesta limpia. Puede forzar formato JSON."""
+    payload = {"model": model, "prompt": prompt, "stream": False}
+    
+    if as_json:
+        payload["format"] = "json"
     if system:
         payload["system"] = system
-    async with httpx.AsyncClient(timeout=None) as c:
+        
+    async with httpx.AsyncClient(timeout=120.0) as c:
         r = await c.post(f"{OLLAMA_URL}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()["response"].strip()
 
 
-def parse_json_safe(raw: str) -> dict | None:
+def parse_json_safe(raw: str) -> Optional[dict]:
     """Extrae y parsea JSON de la respuesta del modelo, tolerante a markdown."""
     try:
         clean = raw.strip().strip("```json").strip("```").strip()
@@ -88,7 +92,7 @@ def ser(doc: dict) -> dict:
     return doc
 
 
-async def get_session(user_id: str) -> dict | None:
+async def get_session(user_id: str) -> Optional[dict]:
     """Obtiene la sesión DJ activa del usuario desde Redis."""
     raw = await redis_client.get(f"dj:session:{user_id}")
     return json.loads(raw) if raw else None
@@ -201,7 +205,7 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
     user_id = payload.get("id")
 
     # 1. Clasificar mood
-    mood_raw  = await call_ollama(MODEL_LIGHT, build_mood_prompt(req.mood), DJ_MOOD_SYSTEM)
+    mood_raw  = await call_ollama(MODEL_LIGHT, build_mood_prompt(req.mood), DJ_MOOD_SYSTEM, as_json=True)
     mood_data = parse_json_safe(mood_raw) or {
         "mood":          req.mood,
         "energy_target": 5,
@@ -225,7 +229,7 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
 
     # 3. El modelo principal elige y se presenta
     prompt   = build_dj_start_prompt(req.mood, candidates)
-    dj_raw   = await call_ollama(MODEL_MAIN, prompt, DJ_START_SYSTEM)
+    dj_raw   = await call_ollama(MODEL_MAIN, prompt, DJ_START_SYSTEM, as_json=False)
     dj_data  = parse_json_safe(dj_raw) or {}
 
     chosen_id = dj_data.get("song_id") if dj_data else None
@@ -335,7 +339,7 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
         candidates     = candidates,
         lyrics_snippet = lyrics_snippet,
     )
-    dj_raw  = await call_ollama(MODEL_MAIN, prompt, DJ_NEXT_SYSTEM)
+    dj_raw  = await call_ollama(MODEL_MAIN, prompt, DJ_NEXT_SYSTEM, as_json=False)
     dj_data = parse_json_safe(dj_raw)
 
     # 🚨 EXTRACCIÓN Y LIMPIEZA ABSOLUTA DEL ID DE LA IA EN NEXT
