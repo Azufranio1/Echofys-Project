@@ -7,7 +7,8 @@ export const API = {
   playlists: `${HOST}:8084/api/playlists`,
   favorites: `${HOST}:8085/api/favorites`,
   stats:     `${HOST}:8086/api/stats`,
-    lyrics: `${HOST}:8087/lyrics`,
+  lyrics: `${HOST}:8087/lyrics`,
+  ai: `${HOST}:8090/api/ai`,
 } as const;
 
 // Helper headers con token
