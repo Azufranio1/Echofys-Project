@@ -66,7 +66,7 @@ MAX_HISTORY = int(os.getenv("MAX_HISTORY_MESSAGES",  "20"))
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 db           = mongo_client["Echofy-Music-Data"]
-songs_col    = db["musics"]   # ← ajusta si tu colección tiene otro nombre
+songs_col    = db["Music"]   # ← ajusta si tu colección tiene otro nombre
 
 
 # ══════════════════════════════════════════════════════
@@ -145,7 +145,7 @@ async def classify_intent(message: str) -> dict:
             MODEL_LIGHT,
             f'Mensaje: "{message}"',
             INTENT_SYSTEM,
-            as_json=True,  # 👈 Activamos el modo JSON para el clasificador
+            as_json=True,
         )
         # Limpiar posible markdown que el modelo añada
         raw = raw.strip().strip("```json").strip("```").strip()

@@ -1,4 +1,3 @@
-# Skills package — Echofy AI
 from .skill_recommend    import recommend_from_history, recommend_by_song
 from .skill_search_yt    import search_youtube, get_playlist_videos
 from .skill_search_itunes import search_itunes, enrich_metadata
