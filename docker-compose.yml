@@ -141,6 +141,13 @@ services:
       - "8090:8090"
     volumes:
       - ./services/ai:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     env_file:
       - ./services/ai/.env
     depends_on:
