@@ -226,57 +226,43 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
     # 3. El modelo principal elige y se presenta
     prompt   = build_dj_start_prompt(req.mood, candidates)
     dj_raw   = await call_ollama(MODEL_MAIN, prompt, DJ_START_SYSTEM)
-    dj_data  = parse_json_safe(dj_raw)
+    dj_data  = parse_json_safe(dj_raw) or {}
 
     chosen_id = dj_data.get("song_id") if dj_data else None
     if chosen_id:
         chosen_id = str(chosen_id).strip().replace('"', "").replace("'", "")
 
-    chosen = next((c for c in candidates if c["_id"] == chosen_id), None)
+    # Buscamos la canción elegida por la IA dentro de nuestros candidatos reales
+    chosen_song = next((c for c in candidates if str(c["_id"]) == chosen_id), None)
 
-    # 🚨 SISTEMA ANTI-404: Validar disponibilidad real en el microservicio de música
-    async def verificar_cancion_sana(song_doc) -> bool:
-        if not song_doc:
-            return False
-        try:
-            # Reemplaza con la URL interna real de tu microservicio 'echofy-songs'
-            # Ejemplo: http://echofy-songs:PORT/api/songs/verify/{driveId}
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                # Simulamos o consultamos si el servicio acepta el driveId
-                # Si tu arquitectura actual no expone una verificación directa, envolvemos
-                # la llamada al reproductor en un bloque try/except general.
-                return True 
-        except Exception:
-            return False
-
-    # Si la IA falló o el ID alucinado no está en los candidatos, aplicamos fallback dinámico
-    if not chosen:
-        # Recorremos los candidatos buscando el primero que tenga datos consistentes
-        for cand in candidates:
-            # Aquí puedes omitir IDs que sepas que están rotos en tu Drive local
-            chosen = cand
-            chosen_id = cand["_id"]
-            break
-        intro = f"Arranco tu sesión con '{chosen['title']}' de {chosen['artist']}. Que fluya."
+    # 🚨 SISTEMA ANTI-404: Fallback dinámico si la IA falló o inventó un ID
+    if not chosen_song:
+        if candidates:
+            chosen_song = candidates[0]
+            chosen_id = str(chosen_song["_id"])
+            intro = f"A ver, arranquemos con un clásico para romper el hielo: '{chosen_song['title']}' de {chosen_song['artist']}. ¡Sube el volumen!"
+        else:
+            raise HTTPException(status_code=404, detail="No hay canciones disponibles en la base de datos para este mood.")
     else:
-        intro = dj_data.get("intro", f"Empezamos con '{chosen['title']}'. Disfrútalo.")
+        # Si la IA funcionó bien, extraemos la intro que generó ella
+        intro = dj_data.get("intro", f"Empezamos la sesión con '{chosen_song['title']}' de {chosen_song['artist']}.")
 
-    # 4. Guardar sesión en Redis
+    # 4. Guardar sesión en Redis usando la variable uniforme chosen_song
     session = {
         "mood":          req.mood,
         "mood_data":     mood_data,
         "energy_target": energy_target,
         "genres_hint":   genres_hint,
         "played_ids":    [chosen_id],
-        "current_song":  chosen,
+        "current_song":  chosen_song,
         "history": [
-            {"song_id": chosen_id, "signal": "started", "title": chosen["title"]}
+            {"song_id": chosen_id, "signal": "started", "title": chosen_song["title"]}
         ],
     }
     await save_session(user_id, session)
 
     return {
-        "song":    chosen,
+        "song":    chosen_song,
         "intro":   intro,
         "mood":    mood_data.get("mood", req.mood),
         "session": {
