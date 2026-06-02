@@ -43,9 +43,16 @@ from skills import (
 load_dotenv()
 
 app = FastAPI(title="Echofy AI Service")
+
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins, # O usa ["*"] si estás en desarrollo local rápido
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
