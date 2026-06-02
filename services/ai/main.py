@@ -27,7 +27,6 @@ import json, os, re, jwt as pyjwt
 from dotenv import load_dotenv
 
 from dj_router import dj_router
-app.include_router(dj_router)
 
 from skills import (
     recommend_from_history,
@@ -50,6 +49,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(dj_router)
 
 # ── Configuración ──────────────────────────────────────
 OLLAMA_URL  = os.getenv("OLLAMA_URL",  "http://ollama:11434")
