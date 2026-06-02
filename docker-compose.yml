@@ -138,7 +138,7 @@ services:
     build: ./services/ai
     container_name: echofy-ai
     ports:
-      - "8090:8090"
+      - "8090:3000"
     volumes:
       - ./services/ai:/app
     env_file:
