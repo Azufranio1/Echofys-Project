@@ -66,7 +66,7 @@ MAX_HISTORY = int(os.getenv("MAX_HISTORY_MESSAGES",  "20"))
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 db           = mongo_client["Echofy-Music-Data"]
-songs_col    = db["musics"]   # ← ajusta si tu colección tiene otro nombre
+songs_col    = db["Music"]   # ← ajusta si tu colección tiene otro nombre
 
 
 # ══════════════════════════════════════════════════════
