@@ -42,7 +42,7 @@ SESSION_TTL = 60 * 60 * 4   # sesión DJ dura 4 horas máximo
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 db           = mongo_client["Echofy-Music-Data"]
-songs_col    = db["musics"]
+songs_col    = db["Music"]
 lyrics_col   = db["lyrics"]
 
 
@@ -289,13 +289,24 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
             detail="No hay sesión DJ activa. Inicia una con /dj/start"
         )
 
-    # 2. Obtener canción anterior
+    # 2. Obtener canción anterior (Compatible con String y ObjectId)
     try:
+        # Intentamos buscar por String directo primero ya que tu colección usa Strings
         prev_doc = await songs_col.find_one(
-            {"_id": ObjectId(req.current_song_id)},
-            {"_id": 1, "title": 1, "artist": 1, "genre": 1,
-             "artwork": 1, "driveId": 1, "playCount": 1}
+            {"_id": req.current_song_id},
+            {"_id": 1, "title": 1, "artist": 1, "genre": 1, "artwork": 1, "driveId": 1, "playCount": 1}
         )
+        
+        # Si no lo encuentra, intentamos con ObjectId por si acaso
+        if not prev_doc:
+            try:
+                prev_doc = await songs_col.find_one(
+                    {"_id": ObjectId(req.current_song_id)},
+                    {"_id": 1, "title": 1, "artist": 1, "genre": 1, "artwork": 1, "driveId": 1, "playCount": 1}
+                )
+            except Exception:
+                pass
+
         prev_song = ser(prev_doc) if prev_doc else session.get("current_song", {})
     except Exception:
         prev_song = session.get("current_song", {})

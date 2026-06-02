@@ -145,7 +145,7 @@ async def classify_intent(message: str) -> dict:
             MODEL_LIGHT,
             f'Mensaje: "{message}"',
             INTENT_SYSTEM,
-            as_json=True,  # 👈 Activamos el modo JSON para el clasificador
+            as_json=True,
         )
         # Limpiar posible markdown que el modelo añada
         raw = raw.strip().strip("```json").strip("```").strip()
