@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ChevronDown, Music2, Play, Pause, SkipBack, SkipForward,
          Volume2, VolumeX, Download, Users, Mic2, Clock, Compass,
-         AlignLeft, ListMusic, Loader2 } from 'lucide-react';
+         AlignLeft, ListMusic, Loader2, Maximize2 } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import HeartButton from './HeartButton';
 import type { QueueMeta } from '../hooks/useQueue';
@@ -14,6 +14,7 @@ interface Props {
   onClose: () => void;
   onSelectSong: (song: any) => void;
   onDownload: () => void;
+  onFullscreen: () => void;
   currentTime: number;
   duration: number;
   isMuted: boolean;
@@ -84,54 +85,46 @@ function useLyrics(song: any) {
   const load = useCallback(async (s: any) => {
     if (!s?._id) return;
     setState({ status: 'loading' });
-
-   try {
-  const res = await fetch(`${API.lyrics}/${s._id}`, { headers: authHeaders() });
-  if (res.ok) {
-    const data = await res.json();
-    if (data.hasSyncedLyrics && data.syncedLyrics) {
-      setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
-      return;
+    try {
+      const res = await fetch(`${API.lyrics}/${s._id}`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.hasSyncedLyrics && data.syncedLyrics) {
+          setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
+          return;
+        }
+        if (data.hasPlainLyrics && data.plainLyrics) {
+          setState({ status: 'plain', text: data.plainLyrics });
+          return;
+        }
+        if (data.instrumental) { setState({ status: 'none' }); return; }
+      }
+      if (res.status !== 404) { setState({ status: 'none' }); return; }
+      const fetchRes = await fetch(`${API.lyrics}/${s._id}/fetch`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          trackName:  s.title,
+          artistName: s.artist,
+          albumName:  s.album,
+          duration:   s.durationSeconds,
+        }),
+      });
+      if (fetchRes.ok) {
+        const data = await fetchRes.json();
+        if (data.hasSyncedLyrics && data.syncedLyrics) {
+          setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
+          return;
+        }
+        if (data.hasPlainLyrics && data.plainLyrics) {
+          setState({ status: 'plain', text: data.plainLyrics });
+          return;
+        }
+      }
+      setState({ status: 'none' });
+    } catch {
+      setState({ status: 'error' });
     }
-    if (data.hasPlainLyrics && data.plainLyrics) {
-      setState({ status: 'plain', text: data.plainLyrics });
-      return;
-    }
-    if (data.instrumental) { setState({ status: 'none' }); return; }
-  }
-
-  if (res.status !== 404) {
-    setState({ status: 'none' });
-    return;
-  }
-
-  // Solo llega aquí si fue 404 → buscar en LRCLIB
-  const fetchRes = await fetch(`${API.lyrics}/${s._id}/fetch`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({
-      trackName:  s.title,
-      artistName: s.artist,
-      albumName:  s.album,
-      duration:   s.durationSeconds,
-    }),
-  });
-
-  if (fetchRes.ok) {
-    const data = await fetchRes.json();
-    if (data.hasSyncedLyrics && data.syncedLyrics) {
-      setState({ status: 'synced', lines: parseLrc(data.syncedLyrics) });
-      return;
-    }
-    if (data.hasPlainLyrics && data.plainLyrics) {
-      setState({ status: 'plain', text: data.plainLyrics });
-      return;
-    }
-  }
-  setState({ status: 'none' });
-} catch {
-  setState({ status: 'error' });
-}
   }, []);
 
   useEffect(() => {
@@ -145,7 +138,7 @@ function useLyrics(song: any) {
 }
 
 const ExpandedPlayer = ({
-  song, queue, queueMeta, onClose, onSelectSong, onDownload,
+  song, queue, queueMeta, onClose, onSelectSong, onDownload, onFullscreen,
   currentTime, duration, isMuted, volume,
   onSeek, onVolumeChange, onToggleMute, onSkipBack, onSkipForward,
 }: Props) => {
@@ -255,6 +248,7 @@ const ExpandedPlayer = ({
         .exp-bar-icon { background:none; border:none; cursor:pointer; color:#4B5563; display:flex; align-items:center; transition:color 0.15s; padding:3px; }
         .exp-bar-icon:hover { color:#E5E7EB; }
         .exp-bar-icon.dl:hover { color:#10B981; }
+        .exp-bar-icon.fs:hover { color:#a78bfa; }
         .exp-vol-wrap { position:relative; width:72px; height:3px; cursor:pointer; border-radius:4px; }
         .exp-vol-wrap:hover .exp-thumb-dot { opacity:1; }
         @keyframes spin-l { to { transform:rotate(360deg); } }
@@ -292,7 +286,6 @@ const ExpandedPlayer = ({
         </div>
 
         <div className="exp-body">
-
           <div className="exp-left">
             <div className="exp-artwork">
               {song.artwork
@@ -439,6 +432,9 @@ const ExpandedPlayer = ({
             </div>
           </div>
           <div className="exp-bar-right">
+            <button className="exp-bar-icon fs" onClick={onFullscreen} title="Pantalla completa">
+              <Maximize2 size={14}/>
+            </button>
             <button className="exp-bar-icon dl" onClick={onDownload} title="Descargar"><Download size={14}/></button>
             <button className="exp-bar-icon" onClick={onToggleMute}>
               {isMuted || volume===0 ? <VolumeX size={14}/> : <Volume2 size={14}/>}

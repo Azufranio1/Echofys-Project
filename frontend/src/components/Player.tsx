@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { usePlayerStore } from '../store/usePlayerStore';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Music2, Download, ChevronUp } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Music2, Download, ChevronUp, Maximize2 } from 'lucide-react';
 import ExpandedPlayer from './ExpandedPlayer';
+import FullscreenPlayer from './FullscreenPlayer';
 import HeartButton from './HeartButton';
 import { useQueue } from '../hooks/useQueue';
 import { API, authHeaders } from '../lib/api';
@@ -11,8 +12,8 @@ const Player = () => {
   const { currentSong, isPlaying, togglePlay, setCurrentSong, setPlaying } = usePlayerStore();
   const { queue, meta, registerPlay, loadQueue, getNext } = useQueue();
 
-  const audioRef    = useRef<HTMLAudioElement>(null);
-  const historyRef  = useRef<any[]>([]); // historial de canciones reproducidas
+  const audioRef   = useRef<HTMLAudioElement>(null);
+  const historyRef = useRef<any[]>([]);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration,    setDuration]    = useState(0);
@@ -20,16 +21,15 @@ const Player = () => {
   const [volume,      setVolume]      = useState(70);
   const [isDragging,  setIsDragging]  = useState(false);
   const [isExpanded,  setIsExpanded]  = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
 
-  // Cuando cambia la canción: registrar play + cargar cola
   useEffect(() => {
     if (!currentSong?._id) return;
     registerPlay(currentSong._id);
     loadQueue(currentSong._id);
   }, [currentSong?._id]);
 
-  // Play/pause en el elemento audio
   useEffect(() => {
     if (!audioRef.current) return;
     if (isPlaying) audioRef.current.play().catch(() => {});
@@ -103,7 +103,7 @@ const Player = () => {
 
   const handleSelectSong = (song: any) => goToSong(song);
 
-  const prog      = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const prog       = duration > 0 ? (currentTime / duration) * 100 : 0;
   const volDisplay = isMuted ? 0 : volume;
 
   if (!currentSong) return null;
@@ -151,6 +151,7 @@ const Player = () => {
         .player-icon-btn { background:none; border:none; cursor:pointer; color:#4B5563; display:flex; align-items:center; transition:color 0.15s; padding:4px; }
         .player-icon-btn:hover { color:#E5E7EB; }
         .player-icon-btn.dl:hover { color:#10B981; }
+        .player-icon-btn.fs:hover { color:#a78bfa; }
         .expanded-overlay { position:fixed; inset:0; z-index:200; animation:slideUp 0.32s cubic-bezier(0.16,1,0.3,1) forwards; }
         @keyframes slideUp { from{opacity:0;transform:translateY(30px)} to{opacity:1;transform:translateY(0)} }
       `}</style>
@@ -158,23 +159,42 @@ const Player = () => {
       {isExpanded && createPortal(
         <div className="expanded-overlay">
           <ExpandedPlayer
-            song={currentSong}
-            queue={queue}
-            queueMeta={meta}
-            onClose={() => setIsExpanded(false)}
-            onSelectSong={handleSelectSong}
-            onDownload={handleDownload}
-            currentTime={currentTime}
-            duration={duration}
-            isMuted={isMuted}
-            volume={volume}
-            onSeek={handleSeek}
-            onVolumeChange={handleVolumeChange}
-            onToggleMute={toggleMute}
-            onSkipBack={handleSkipBack}
-            onSkipForward={handleSkipForward}
-          />
+              song={currentSong}
+              queue={queue}
+              queueMeta={meta}
+              onClose={() => setIsExpanded(false)}
+              onSelectSong={handleSelectSong}
+              onDownload={handleDownload}
+              onFullscreen={() => { setIsExpanded(false); setIsFullscreen(true); }}
+              currentTime={currentTime}
+              duration={duration}
+              isMuted={isMuted}
+              volume={volume}
+              onSeek={handleSeek}
+              onVolumeChange={handleVolumeChange}
+              onToggleMute={toggleMute}
+              onSkipBack={handleSkipBack}
+              onSkipForward={handleSkipForward}
+            />
+        
         </div>,
+        document.body
+      )}
+
+      {isFullscreen && createPortal(
+        <FullscreenPlayer
+          song={currentSong}
+          currentTime={currentTime}
+          duration={duration}
+          isMuted={isMuted}
+          volume={volume}
+          onClose={() => setIsFullscreen(false)}
+          onSeek={handleSeek}
+          onVolumeChange={handleVolumeChange}
+          onToggleMute={toggleMute}
+          onSkipBack={handleSkipBack}
+          onSkipForward={handleSkipForward}
+        />,
         document.body
       )}
 
@@ -222,7 +242,12 @@ const Player = () => {
 
         {/* RIGHT */}
         <div className="player-right">
-          <button className="player-icon-btn dl" onClick={handleDownload} title="Descargar"><Download size={17}/></button>
+          <button className="player-icon-btn fs" onClick={() => setIsFullscreen(true)} title="Pantalla completa">
+            <Maximize2 size={17}/>
+          </button>
+          <button className="player-icon-btn dl" onClick={handleDownload} title="Descargar">
+            <Download size={17}/>
+          </button>
           <button className="player-icon-btn" onClick={toggleMute}>
             {isMuted || volume === 0 ? <VolumeX size={17}/> : <Volume2 size={17}/>}
           </button>

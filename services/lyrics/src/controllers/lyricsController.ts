@@ -2,7 +2,7 @@ import { Response } from "express";
 import { AuthRequest } from "../middleware/authMiddleware";
 import { Lyrics } from "../models/Lyrics";
 import redis from "../lib/redis";
-import { fetchFromLrclib } from "../lib/lrclibClient";
+import { fetchLyricsFromAllProviders } from "../lib/lyricsProviders";
 
 const CACHE_TTL = 60 * 60 * 24 * 7;
 
@@ -60,11 +60,11 @@ export const getLyrics = async (req: AuthRequest, res: Response): Promise<void> 
 
   res.status(404).json({
     error: "Sin letras",
-    hint: "Usa POST /lyrics/:songId/fetch para buscar en LRCLIB",
+    hint: "Usa POST /lyrics/:songId/fetch para buscar automáticamente",
   });
 };
 
-export const fetchAndSaveLyrics = async (req: AuthRequest, res: Response): Promise<void> => {
+]export const fetchAndSaveLyrics = async (req: AuthRequest, res: Response): Promise<void> => {
   const { songId } = req.params;
   const { trackName, artistName, albumName, duration } = req.body as {
     trackName: string; artistName: string; albumName?: string; duration?: number;
@@ -81,26 +81,41 @@ export const fetchAndSaveLyrics = async (req: AuthRequest, res: Response): Promi
     return;
   }
 
-  const result = await fetchFromLrclib({ trackName, artistName, albumName, duration });
+  const result = await fetchLyricsFromAllProviders({ trackName, artistName, albumName, duration });
 
   if (!result) {
-    res.status(404).json({ error: "No encontrado en LRCLIB", hint: "Sube letras manualmente con PUT /lyrics/:songId" });
+    res.status(404).json({ error: "No encontrado en ninguna fuente", hint: "Sube letras manualmente con PUT /lyrics/:songId" });
     return;
   }
 
-  const lyrics = await Lyrics.create({
-    songId, trackName, artistName,
-    albumName: result.albumName || albumName,
-    durationSeconds: result.duration || duration,
-    plainLyrics:  result.plainLyrics  ?? undefined,
-    syncedLyrics: result.syncedLyrics ?? undefined,
-    source: "lrclib",
-    instrumental: result.instrumental,
-  });
+  try {
+    const lyrics = await Lyrics.create({
+      songId, trackName, artistName,
+      albumName,
+      durationSeconds: duration,
+      plainLyrics:  result.plainLyrics  ?? undefined,
+      syncedLyrics: result.syncedLyrics ?? undefined,
+      source:       result.source === "manual" ? "manual" : "lrclib",
+      instrumental: result.instrumental,
+    });
 
-  const payload = buildPayload(lyrics);
-  await cacheSet(`lyrics:${songId}`, payload);
-  res.status(201).json({ ...payload, servedFrom: "lrclib" });
+    const payload = buildPayload(lyrics);
+    await cacheSet(`lyrics:${songId}`, payload);
+    res.status(201).json({ ...payload, servedFrom: result.source });
+
+  } catch (err: any) {
+    // Si hay duplicate key, la canción ya fue insertada por otra petición simultánea
+    if (err.code === 11000) {
+      const saved = await Lyrics.findOne({ songId });
+      if (saved) {
+        const payload = buildPayload(saved);
+        await cacheSet(`lyrics:${songId}`, payload);
+        res.json({ ...payload, servedFrom: "db" });
+        return;
+      }
+    }
+    throw err;
+  }
 };
 
 export const upsertLyrics = async (req: AuthRequest, res: Response): Promise<void> => {
