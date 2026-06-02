@@ -144,6 +144,8 @@ services:
       - ./services/ai:/app
     env_file:
       - ./services/ai/.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redis
     restart: unless-stopped
