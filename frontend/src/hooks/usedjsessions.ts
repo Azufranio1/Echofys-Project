@@ -16,21 +16,21 @@ export interface DJSong {
 export interface DJState {
   active:      boolean;
   loading:     boolean;
-  narration:   string;   // última frase del DJ (intro o transición)
-  mood:        string;   // mood clasificado por el modelo ligero
-  energyLevel: number;   // 1-9, nivel de energía actual de la sesión
+  narration:   string;
+  mood:        string;
+  energyLevel: number;
   songsPlayed: number;
+  queue:       DJSong[];   // cola local de canciones pre-cargadas
 }
 
 export interface UseDJSession {
-  djState:    DJState;
-  startDJ:    (mood: string) => Promise<DJSong | null>;
-  nextDJ:     (currentSongId: string, signal: ListenSignal) => Promise<DJSong | null>;
-  endDJ:      () => Promise<void>;
-  resetDJ:    () => void;
+  djState:  DJState;
+  startDJ:  (mood: string) => Promise<DJSong | null>;
+  nextDJ:   (currentSongId: string, signal: ListenSignal) => Promise<DJSong | null>;
+  endDJ:    () => Promise<void>;
+  resetDJ:  () => void;
 }
 
-// ── Estado inicial ─────────────────────────────────────
 const INITIAL_STATE: DJState = {
   active:      false,
   loading:     false,
@@ -38,7 +38,12 @@ const INITIAL_STATE: DJState = {
   mood:        '',
   energyLevel: 5,
   songsPlayed: 0,
+  queue:       [],
 };
+
+const REFILL_THRESHOLD = 3;   // pedir más canciones cuando queden ≤ 3 en cola
+const QUEUE_SIZE       = 10;  // cuántas canciones pedir cada vez
+
 
 // ══════════════════════════════════════════════════════
 //  Hook principal
@@ -46,14 +51,60 @@ const INITIAL_STATE: DJState = {
 export const useDJSession = (): UseDJSession => {
   const [djState, setDJState] = useState<DJState>(INITIAL_STATE);
 
-  // Evitar llamadas duplicadas si el modelo tarda
-  const pendingRef = useRef(false);
+  const pendingRef    = useRef(false);   // evitar llamadas duplicadas al modelo
+  const refillingRef  = useRef(false);   // evitar refills simultáneos
 
 
-  // ── Actualizar estado parcialmente ──────────────────
   const patch = useCallback((updates: Partial<DJState>) => {
     setDJState(prev => ({ ...prev, ...updates }));
   }, []);
+
+
+  // ── Pedir cola de canciones al backend ─────────────
+  const fetchQueue = useCallback(async (
+    lastSongId:   string,
+    signal:       ListenSignal,
+    count:        number = QUEUE_SIZE,
+  ): Promise<DJSong[]> => {
+    try {
+      const res = await fetch(`${API.ai}/dj/queue`, {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({
+          current_song_id: lastSongId,
+          listen_signal:   signal,
+          count,
+        }),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.songs ?? [];
+    } catch {
+      return [];
+    }
+  }, []);
+
+
+  // ── Refill silencioso cuando la cola está baja ─────
+  const refillIfNeeded = useCallback(async (
+    queue:      DJSong[],
+    lastSongId: string,
+    signal:     ListenSignal,
+  ) => {
+    if (refillingRef.current || queue.length > REFILL_THRESHOLD) return;
+    refillingRef.current = true;
+    try {
+      const newSongs = await fetchQueue(lastSongId, signal, QUEUE_SIZE);
+      if (newSongs.length > 0) {
+        setDJState(prev => ({
+          ...prev,
+          queue: [...prev.queue, ...newSongs],
+        }));
+      }
+    } finally {
+      refillingRef.current = false;
+    }
+  }, [fetchQueue]);
 
 
   // ── Iniciar sesión DJ ──────────────────────────────
@@ -61,29 +112,34 @@ export const useDJSession = (): UseDJSession => {
     if (pendingRef.current) return null;
     pendingRef.current = true;
 
-    patch({ loading: true, narration: '', mood: '' });
+    patch({ loading: true, narration: '', mood: '', queue: [] });
 
     try {
       const res = await fetch(`${API.ai}/dj/start`, {
         method:  'POST',
         headers: authHeaders(),
-        body:    JSON.stringify({ mood }),
+        body:    JSON.stringify({ mood, count: QUEUE_SIZE }),
       });
 
       if (!res.ok) throw new Error(`DJ start failed: ${res.status}`);
 
       const data = await res.json();
 
+      // El backend devuelve la primera canción + una cola de siguientes
+      const firstSong: DJSong | null = data.song  ?? null;
+      const preQueue:  DJSong[]      = data.queue  ?? [];
+
       patch({
         active:      true,
         loading:     false,
-        narration:   data.intro        ?? '',
-        mood:        data.mood         ?? mood,
+        narration:   data.intro              ?? '',
+        mood:        data.mood               ?? mood,
         energyLevel: data.session?.energy_target ?? 5,
         songsPlayed: 1,
+        queue:       preQueue,
       });
 
-      return data.song ?? null;
+      return firstSong;
 
     } catch (err) {
       console.error('[DJ] startDJ error:', err);
@@ -98,11 +154,34 @@ export const useDJSession = (): UseDJSession => {
   // ── Siguiente canción ──────────────────────────────
   const nextDJ = useCallback(async (
     currentSongId: string,
-    signal: ListenSignal,
+    signal:        ListenSignal,
   ): Promise<DJSong | null> => {
-    if (!djState.active || pendingRef.current) return null;
-    pendingRef.current = true;
+    if (!djState.active) return null;
 
+    // Consumir de la cola local sin llamar al modelo
+    const [next, ...remaining] = djState.queue;
+
+    if (next) {
+      patch({
+        queue:       remaining,
+        songsPlayed: djState.songsPlayed + 1,
+        // La narración de transición llega del /dj/next solo cuando
+        // el modelo genera una específica — aquí usamos la de la cola
+        narration: next.transition as string ?? '',
+      });
+
+      // Refill silencioso si la cola está baja
+      refillIfNeeded(remaining, currentSongId, signal);
+
+      // Notificar al backend la señal (actualiza energy_target en Redis)
+      sendSignal(currentSongId, signal);
+
+      return next;
+    }
+
+    // Cola vacía — llamar al modelo directamente (fallback)
+    if (pendingRef.current) return null;
+    pendingRef.current = true;
     patch({ loading: true });
 
     try {
@@ -121,10 +200,16 @@ export const useDJSession = (): UseDJSession => {
 
       patch({
         loading:     false,
-        narration:   data.transition         ?? '',
+        narration:   data.transition             ?? '',
         energyLevel: data.session?.energy_target ?? djState.energyLevel,
         songsPlayed: data.session?.songs_played  ?? djState.songsPlayed + 1,
+        queue:       [],
       });
+
+      // Refill inmediato después del fallback
+      if (data.song) {
+        refillIfNeeded([], data.song._id, signal);
+      }
 
       return data.song ?? null;
 
@@ -135,7 +220,7 @@ export const useDJSession = (): UseDJSession => {
     } finally {
       pendingRef.current = false;
     }
-  }, [djState.active, djState.energyLevel, djState.songsPlayed, patch]);
+  }, [djState, patch, refillIfNeeded]);
 
 
   // ── Terminar sesión ────────────────────────────────
@@ -146,20 +231,36 @@ export const useDJSession = (): UseDJSession => {
         headers: authHeaders(),
       });
     } catch {
-      // Silenciar — el TTL de Redis limpiará la sesión de todas formas
+      // TTL de Redis limpiará la sesión
     } finally {
       setDJState(INITIAL_STATE);
-      pendingRef.current = false;
+      pendingRef.current   = false;
+      refillingRef.current = false;
     }
   }, []);
 
 
-  // ── Reset local sin llamada al servidor ────────────
+  // ── Reset local ────────────────────────────────────
   const resetDJ = useCallback(() => {
     setDJState(INITIAL_STATE);
-    pendingRef.current = false;
+    pendingRef.current   = false;
+    refillingRef.current = false;
   }, []);
 
 
   return { djState, startDJ, nextDJ, endDJ, resetDJ };
+};
+
+
+// ── Helper: notificar señal al backend sin bloquear ──
+const sendSignal = async (songId: string, signal: ListenSignal) => {
+  try {
+    await fetch(`${API.player}/listen-signal`, {
+      method:  'POST',
+      headers: authHeaders(),
+      body:    JSON.stringify({ songId, signal, progressPct: 100 }),
+    });
+  } catch {
+    // Silenciar
+  }
 };

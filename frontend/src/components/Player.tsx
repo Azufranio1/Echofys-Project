@@ -187,6 +187,22 @@ const Player = () => {
     }
   };
 
+  const sendListenSignal = async (
+    songId: string,
+    signal: 'completed' | 'skipped_early' | 'skipped_mid',
+    progressPct: number,
+  ) => {
+    try {
+      await fetch(`${API.player}/listen-signal`, {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({ songId, signal, progressPct }),
+      });
+    } catch {
+      // Silenciar — no crítico
+    }
+  };
+
   const handleEnded = () => {
     handleSongChangeOrEnd('completed');
     if (djState.mode) {

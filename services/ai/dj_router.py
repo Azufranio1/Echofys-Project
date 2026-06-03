@@ -195,6 +195,16 @@ class DJNextRequest(BaseModel):
     listen_signal:   str            # "completed" | "skipped_early" | "skipped_mid"
     progress_pct:    Optional[float] = 100.0  # % de la canción escuchada (0-100)
 
+class DJQueueRequest(BaseModel):
+    current_song_id: str
+    listen_signal:   str   = "completed"
+    count:           int   = 10
+
+class DJSignalRequest(BaseModel):
+    songId:      str
+    signal:      str          # "completed" | "skipped_early" | "skipped_mid"
+    progressPct: float = 100.0
+
 
 # ══════════════════════════════════════════════════════
 #  Endpoints
@@ -266,8 +276,51 @@ async def dj_start(req: DJStartRequest, authorization: str = Header(...)):
     }
     await save_session(user_id, session)
 
+    pre_queue = []
+    try:
+        queue_candidates = await get_candidates(
+            exclude_ids   = [chosen_id],   # excluir la primera canción
+            energy_target = energy_target,
+            genres_hint   = genres_hint,
+            limit         = 30,
+        )
+ 
+        # Pedir al modelo ligero que ordene las siguientes canciones
+        queue_system = "Responde ÚNICAMENTE con JSON. Formato: {\"song_ids\": [\"id1\", \"id2\", ...]}"
+        queue_list   = "\\n".join(
+            f'- id:{c["_id"]} | "{c["title"]}" de {c["artist"]} | energy:{get_energy(c.get("genre",""))}'
+            for c in queue_candidates[:20]
+        )
+        queue_prompt = f'Mood: "{req.mood}", Energy: {energy_target}/9. Ordena 10 canciones óptimas:\\n{queue_list}'
+ 
+        queue_raw    = await call_ollama(MODEL_LIGHT, queue_prompt, queue_system, as_json=True)
+        queue_parsed = parse_json_safe(queue_raw)
+        queue_ids    = queue_parsed.get("song_ids", []) if queue_parsed else []
+        id_map       = {str(c["_id"]): c for c in queue_candidates}
+ 
+        for sid in queue_ids:
+            sid_clean = str(sid).strip().replace('"','').replace("'","")
+            if sid_clean in id_map and len(pre_queue) < 10:
+                pre_queue.append(id_map[sid_clean])
+ 
+        # Completar con candidatos directos si el modelo no eligió suficientes
+        if len(pre_queue) < 10:
+            existing = {str(s["_id"]) for s in pre_queue}
+            for c in queue_candidates:
+                if str(c["_id"]) not in existing and len(pre_queue) < 10:
+                    pre_queue.append(c)
+ 
+        # Actualizar played_ids con toda la cola generada
+        session["played_ids"] = [chosen_id] + [str(s["_id"]) for s in pre_queue]
+        await save_session(user_id, session)
+ 
+    except Exception as e:
+        print(f"[DJ] Error generando cola inicial: {e}")
+ 
+    # Añadir 'queue' al return del /start:
     return {
         "song":    chosen_song,
+        "queue":   pre_queue,        # ← NUEVO
         "intro":   intro,
         "mood":    mood_data.get("mood", req.mood),
         "session": {
@@ -416,7 +469,131 @@ async def dj_session(authorization: str = Header(...)):
         "current_song":  session.get("current_song"),
         "genres_hint":   session.get("genres_hint", []),
     }
+ 
+ 
+@dj_router.post("/signal")
+async def dj_signal(req: DJSignalRequest, authorization: str = Header(...)):
+    """
+    Recibe la señal de comportamiento del player y actualiza
+    el energy_target de la sesión DJ activa.
+    Llamado por el servicio player en background — no bloquea el reproductor.
+    """
+    payload = decode_token(authorization)
+    user_id = payload.get("id")
+ 
+    session = await get_session(user_id)
+    if not session:
+        # Sin sesión activa — no hay nada que actualizar
+        return {"ok": True, "active": False}
+ 
+    # Ajustar energy_target según la señal
+    energy_target = session.get("energy_target", 5)
+    if req.signal == "completed":
+        energy_target = min(9, energy_target + 1)
+    elif req.signal == "skipped_early":
+        energy_target = max(1, energy_target - 1)
+    # skipped_mid → mantener
+ 
+    session["energy_target"] = energy_target
+    session["last_signal"]   = req.signal
+    await save_session(user_id, session)
+ 
+    return {
+        "ok":            True,
+        "active":        True,
+        "energy_target": energy_target,
+        "signal":        req.signal,
+    }
 
+@dj_router.post("/queue")
+async def dj_queue(req: DJQueueRequest, authorization: str = Header(...)):
+    """
+    Genera un lote de N canciones para la cola del DJ.
+    Se llama cuando la cola local del frontend queda con ≤ 3 canciones.
+    No genera narración — solo devuelve canciones ordenadas por energía.
+    El modelo ligero elige rápido sin necesidad del modelo principal.
+    """
+    payload = decode_token(authorization)
+    user_id = payload.get("id")
+ 
+    session = await get_session(user_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="No hay sesión DJ activa")
+ 
+    energy_target = session.get("energy_target", 5)
+    played_ids    = session.get("played_ids", [])
+    genres_hint   = session.get("genres_hint", [])
+ 
+    candidates = await get_candidates(
+        exclude_ids   = played_ids,
+        energy_target = energy_target,
+        genres_hint   = genres_hint,
+        limit         = req.count * 3,   # margen para el modelo
+    )
+ 
+    if not candidates:
+        # Resetear played_ids y volver a intentar
+        played_ids = [req.current_song_id]
+        candidates = await get_candidates(
+            exclude_ids   = played_ids,
+            energy_target = energy_target,
+            genres_hint   = genres_hint,
+            limit         = req.count * 3,
+        )
+ 
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No hay más canciones")
+ 
+    # Usar el modelo ligero para ordenar/filtrar los candidatos
+    # Si falla, devolvemos los primeros N directamente (ya están ordenados por energía)
+    system = """Eres un DJ que selecciona canciones para una sesión.
+Responde ÚNICAMENTE con JSON válido, sin texto adicional.
+Formato: {"song_ids": ["id1", "id2", "id3", ...]}
+Selecciona los IDs en el orden óptimo para la sesión."""
+ 
+    songs_list = "\n".join(
+        f'- id:{c["_id"]} | "{c["title"]}" de {c["artist"]} | {c.get("genre","?")} | energy:{get_energy(c.get("genre",""))}'
+        for c in candidates[:req.count * 2]
+    )
+ 
+    prompt = f"""Sesión DJ — Mood: "{session.get('mood', '')}", Energy target: {energy_target}/9
+ 
+Canciones disponibles:
+{songs_list}
+ 
+Selecciona exactamente {req.count} canciones en orden óptimo para la sesión."""
+ 
+    chosen_songs = []
+    try:
+        raw     = await call_ollama(MODEL_LIGHT, prompt, system, as_json=True)
+        parsed  = parse_json_safe(raw)
+        ids     = parsed.get("song_ids", []) if parsed else []
+        id_map  = {str(c["_id"]): c for c in candidates}
+ 
+        for sid in ids:
+            sid_clean = str(sid).strip().replace('"', '').replace("'", "")
+            if sid_clean in id_map and len(chosen_songs) < req.count:
+                chosen_songs.append(id_map[sid_clean])
+    except Exception:
+        pass
+ 
+    # Fallback: completar con candidatos directos si el modelo no eligió suficientes
+    if len(chosen_songs) < req.count:
+        existing = {str(s["_id"]) for s in chosen_songs}
+        for c in candidates:
+            if str(c["_id"]) not in existing and len(chosen_songs) < req.count:
+                chosen_songs.append(c)
+ 
+    # Actualizar played_ids en la sesión
+    new_ids = [str(s["_id"]) for s in chosen_songs]
+    session["played_ids"] = played_ids + new_ids
+    await save_session(user_id, session)
+ 
+    return {
+        "songs": chosen_songs,
+        "count": len(chosen_songs),
+        "energy_target": energy_target,
+    }
 
 @dj_router.delete("/session")
 async def dj_end(authorization: str = Header(...)):
