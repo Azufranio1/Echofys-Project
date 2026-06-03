@@ -9,7 +9,7 @@ import ExpandedPlayer from './ExpandedPlayer';
 import FullscreenPlayer from './FullscreenPlayer';
 import HeartButton from './HeartButton';
 import { useQueue } from '../hooks/useQueue';
-import { useDJSession, type ListenSignal } from '../hooks/usedjsessions';
+import { useDJSession, type ListenSignal } from '../hooks/useDJSession';
 import { API, authHeaders } from '../lib/api';
 
 const Player = () => {
@@ -17,135 +17,176 @@ const Player = () => {
   const { queue, meta, registerPlay, loadQueue, getNext } = useQueue();
   const { djState, startDJ, nextDJ, endDJ } = useDJSession();
 
-  const audioRef     = useRef<HTMLAudioElement>(null);
-  const historyRef   = useRef<any[]>([]);           // historial para skip back
-  const preloadedRef = useRef(false);               // evitar doble pre-carga en modo DJ
-  const listenStart  = useRef<number>(0);           // timestamp cuando empezó a sonar
-  const listenSongId = useRef<string>('');          // canción que se está midiendo
+  const audioRef      = useRef<HTMLAudioElement>(null);
+  const historyRef    = useRef<any[]>([]);
+  const preloadedRef  = useRef(false);
+  const pendingDJSong = useRef<any>(null);   // canción pre-cargada al 80%
 
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration,    setDuration]    = useState(0);
-  const [isMuted,     setIsMuted]     = useState(false);
-  const [volume,      setVolume]      = useState(70);
-  const [isDragging,  setIsDragging]  = useState(false);
-  const [isExpanded,  setIsExpanded]  = useState(false);
+  const [currentTime,  setCurrentTime]  = useState(0);
+  const [duration,     setDuration]     = useState(0);
+  const [isMuted,      setIsMuted]      = useState(false);
+  const [volume,       setVolume]       = useState(70);
+  const [isDragging,   setIsDragging]   = useState(false);
+  const [isExpanded,   setIsExpanded]   = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isBuffering, setIsBuffering] = useState(false);
+  const [isBuffering,  setIsBuffering]  = useState(false);
 
   const volDisplay = isMuted ? 0 : volume;
 
-  // Enviar métricas/señales de escucha al servidor DJ
-  const sendListenSignal = useCallback(async (signal: ListenSignal, elapsedSec: number) => {
-    if (!listenSongId.current) return;
+  // ── Cambiar a canción guardando historial ────────────
+  const goToSong = useCallback((song: any) => {
+    if (currentSong) historyRef.current.push(currentSong);
+    setCurrentSong(song);
+    setPlaying(true);
+    setIsBuffering(false);
+  }, [currentSong, setCurrentSong, setPlaying]);
+
+  // ── Señal de escucha → player backend ───────────────
+  const sendListenSignal = useCallback(async (
+    songId:      string,
+    signal:      ListenSignal,
+    progressPct: number,
+  ) => {
     try {
       await fetch(`${API.player}/listen-signal`, {
-        method: 'POST',
+        method:  'POST',
         headers: authHeaders(),
-        body: JSON.stringify({
-          songId: listenSongId.current,
-          signal,
-          elapsedSeconds: Math.round(elapsedSec),
-          djSessionId: djState.mode ? djState.sessionId : null
-        })
+        body:    JSON.stringify({ songId, signal, progressPct }),
       });
-    } catch (e) {
-      console.error('Error sending listen signal:', e);
+    } catch {
+      // No crítico
     }
-  }, [djState.mode, djState.sessionId]);
+  }, []);
 
-  // Manejar el término de una canción o el salto manual
-  const handleSongChangeOrEnd = useCallback((signal: ListenSignal) => {
-    if (listenStart.current > 0 && listenSongId.current) {
-      const elapsed = (Date.now() - listenStart.current) / 1000;
-      sendListenSignal(signal, elapsed);
-    }
-    listenStart.current = isPlaying ? Date.now() : 0;
-    listenSongId.current = currentSong?._id || '';
-  }, [currentSong?._id, isPlaying, sendListenSignal]);
+  // ── Calcular señal según % escuchado ────────────────
+  const getSignal = useCallback((pct: number): ListenSignal => {
+    if (pct >= 85)  return 'completed';
+    if (pct < 30)   return 'skipped_early';
+    return 'skipped_mid';
+  }, []);
 
-  // Cargar cola inicial si hay canción pero no cola
-  useEffect(() => {
-    if (currentSong && queue.length === 0 && !djState.mode) {
-      loadQueue(currentSong);
-    }
-  }, [currentSong, queue.length, loadQueue, djState.mode]);
-
-  // Sincronizar estado de reproducción del audio nativo
-  useEffect(() => {
-    if (!audioRef.current || !currentSong) return;
-    if (isPlaying) {
-      audioRef.current.play().catch(() => setPlaying(false));
-      if (listenStart.current === 0 && listenSongId.current === currentSong._id) {
-        listenStart.current = Date.now();
-      }
-    } else {
-      audioRef.current.pause();
-      if (listenStart.current > 0) {
-        const elapsed = (Date.now() - listenStart.current) / 1000;
-        sendListenSignal('pause', elapsed);
-        listenStart.current = 0;
-      }
-    }
-  }, [isPlaying, currentSong, sendListenSignal, setPlaying]);
-
-  // Sincronizar volumen del elemento de audio
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volDisplay / 100;
-    }
-  }, [volDisplay]);
-
-  // Monitorear y reportar logs de reproducción completa (30s)
+  // ── Al cambiar de canción ────────────────────────────
   useEffect(() => {
     if (!currentSong?._id) return;
-    handleSongChangeOrEnd('track_changed');
-    preloadedRef.current = false;
 
-    const t = setTimeout(() => {
-      registerPlay(currentSong._id);
-    }, 30000);
+    // Registrar reproducción en el backend (player service)
+    registerPlay(currentSong._id);
 
-    return () => clearTimeout(t);
-  }, [currentSong?._id, registerPlay, handleSongChangeOrEnd]);
+    // Notificar al AI service para contexto
+    fetch(`${API.ai}/context/recent`, {
+      method:  'POST',
+      headers: authHeaders(),
+      body:    JSON.stringify({ song: currentSong }),
+    }).catch(() => {});
 
-  // Disparar pre-carga de DJ IA cuando falten menos de 12 segundos
+    // Cargar cola normal solo si DJ no está activo
+    if (!djState.active) loadQueue(currentSong._id);
+
+    // Resetear pre-carga DJ
+    preloadedRef.current  = false;
+    pendingDJSong.current = null;
+
+  }, [currentSong?._id]); // eslint-disable-line
+
+  // ── Sincronizar play/pause con el audio ─────────────
   useEffect(() => {
-    if (!djState.mode || !isPlaying || duration === 0 || preloadedRef.current) return;
-    const remaining = duration - currentTime;
-    if (remaining <= 12 && remaining > 0) {
-      preloadedRef.current = true;
-      nextDJ(currentSong, queue);
-    }
-  }, [djState.mode, isPlaying, duration, currentTime, currentSong, queue, nextDJ]);
+    if (!audioRef.current || !currentSong) return;
+    if (isPlaying) audioRef.current.play().catch(() => setPlaying(false));
+    else           audioRef.current.pause();
+  }, [isPlaying, currentSong]); // eslint-disable-line
 
-  // Detener la música si se cancela el modo DJ y no quedan canciones
+  // ── Sincronizar volumen ──────────────────────────────
   useEffect(() => {
-    if (!djState.mode && djState.reason === 'ended' && !currentSong) {
-      setPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
-    }
-  }, [djState.mode, djState.reason, currentSong, setPlaying]);
+    if (audioRef.current) audioRef.current.volume = volDisplay / 100;
+  }, [volDisplay]);
 
-  if (!currentSong) return null;
-
+  // ── Time update + pre-carga DJ al 80% ───────────────
   const handleTimeUpdate = () => {
-    if (!isDragging && audioRef.current) {
-      setCurrentTime(audioRef.current.currentTime);
+    if (!audioRef.current || isDragging) return;
+    const t = audioRef.current.currentTime;
+    setCurrentTime(t);
+
+    if (
+      djState.active        &&
+      !preloadedRef.current &&
+      duration > 0          &&
+      t / duration >= 0.8   &&
+      currentSong?._id
+    ) {
+      preloadedRef.current = true;
+      // Pre-cargar la siguiente sin cambiar canción aún
+      nextDJ(currentSong._id, 'completed').then(song => {
+        if (song) pendingDJSong.current = song;
+      });
     }
   };
 
   const handleLoadedMetadata = () => {
-    if (audioRef.current) {
-      setDuration(audioRef.current.duration);
-    }
+    if (audioRef.current) setDuration(audioRef.current.duration);
   };
 
+  // ── Canción terminó ──────────────────────────────────
+  const handleEnded = async () => {
+    if (djState.active) {
+      const next = pendingDJSong.current;
+      pendingDJSong.current = null;
+
+      if (next) {
+        goToSong(next);
+      } else {
+        // Pre-carga no estaba lista, llamar ahora
+        setIsBuffering(true);
+        const song = await nextDJ(currentSong._id, 'completed');
+        if (song) goToSong(song);
+        else setIsBuffering(false);
+      }
+
+      sendListenSignal(currentSong._id, 'completed', 100);
+      return;
+    }
+
+    // Modo normal
+    const next = getNext();
+    if (next) goToSong(next);
+    else setPlaying(false);
+  };
+
+  // ── Skip forward ─────────────────────────────────────
+  const handleSkipForward = async () => {
+    const progressPct = duration > 0 ? (currentTime / duration) * 100 : 0;
+    const signal      = getSignal(progressPct);
+
+    sendListenSignal(currentSong._id, signal, progressPct);
+
+    if (djState.active) {
+      pendingDJSong.current = null;
+      setIsBuffering(true);
+      const song = await nextDJ(currentSong._id, signal);
+      if (song) goToSong(song);
+      else setIsBuffering(false);
+      return;
+    }
+
+    const next = getNext();
+    if (next) goToSong(next);
+  };
+
+  // ── Skip back ────────────────────────────────────────
+  const handleSkipBack = () => {
+    if (djState.active) return;   // deshabilitado en modo DJ
+
+    if (currentTime > 4 || historyRef.current.length === 0) {
+      handleSeek(0);
+      return;
+    }
+    const prev = historyRef.current.pop();
+    if (prev) { setCurrentSong(prev); setPlaying(true); }
+  };
+
+  // ── Seek / volumen / mute ────────────────────────────
   const handleSeek = (t: number) => {
     setCurrentTime(t);
-    if (audioRef.current) {
-      audioRef.current.currentTime = t;
-    }
+    if (audioRef.current) audioRef.current.currentTime = t;
   };
 
   const handleVolumeChange = (v: number) => {
@@ -153,74 +194,46 @@ const Player = () => {
     if (v > 0 && isMuted) setIsMuted(false);
   };
 
-  const toggleMute = () => setIsMuted(!isMuted);
-
-  const handleSkipForward = async () => {
-    handleSongChangeOrEnd('skip_forward');
-    
-    if (djState.mode) {
-      setPlaying(false);
-      setIsBuffering(true);
-      await nextDJ(currentSong, queue, true);
-      return;
-    }
-
-    const next = getNext();
-    if (next) {
-      historyRef.current = [...historyRef.current, currentSong];
-      setCurrentSong(next);
-      setPlaying(true);
-    }
+  const toggleMute = () => {
+    if (!audioRef.current) return;
+    audioRef.current.muted = !isMuted;
+    setIsMuted(!isMuted);
   };
 
-  const handleSkipBack = () => {
-    if (djState.mode) return; // Deshabilitado en sesión DJ por consistencia de continuidad
-    
-    handleSongChangeOrEnd('skip_back');
-    if (currentTime > 4 || historyRef.current.length === 0) {
-      handleSeek(0);
-    } else {
-      const prev = historyRef.current[historyRef.current.length - 1];
-      historyRef.current = historyRef.current.slice(0, -1);
-      setCurrentSong(prev);
-      setPlaying(true);
-    }
-  };
-
-  const handleEnded = () => {
-    handleSongChangeOrEnd('completed');
-    if (djState.mode) {
-      // El flujo del DJ se encarga automáticamente mediante la pre-carga/nextDJ
-      return;
-    }
-    const next = getNext();
-    if (next) {
-      historyRef.current = [...historyRef.current, currentSong];
-      setCurrentSong(next);
-      setPlaying(true);
-    } else {
-      setPlaying(false);
-    }
-  };
-
+  // ── Descarga ─────────────────────────────────────────
   const handleDownload = async () => {
     try {
-      const res = await fetch(`${API.songs}/download/${currentSong.driveId}`, {
+      const res = await fetch(`${API.songs}/stream/${currentSong.driveId}?download=true`, {
         headers: authHeaders(),
       });
       if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
+      const url  = window.URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
       a.download = `${currentSong.artist} - ${currentSong.title}.mp3`;
       document.body.appendChild(a);
       a.click();
       a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (e) {
-      console.error(e);
+      console.error('[Player] Download error:', e);
     }
   };
+
+  // ── DJ callbacks ─────────────────────────────────────
+  const handleDJStart = async (mood: string) => {
+    const song = await startDJ(mood);
+    if (song) goToSong(song);
+  };
+
+  const handleDJEnd = async () => {
+    await endDJ();
+    pendingDJSong.current = null;
+    if (currentSong?._id) loadQueue(currentSong._id);
+  };
+
+  if (!currentSong) return null;
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -229,20 +242,23 @@ const Player = () => {
       <style>{`
         .player-mini { position:fixed; bottom:0; left:0; right:0; height:72px; background:#0b0b14; border-top:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:space-between; padding:0 20px; z-index:100; font-family:'Sora',sans-serif; box-shadow:0 -10px 30px rgba(0,0,0,0.5); }
         .player-left { display:flex; align-items:center; gap:12px; width:30%; min-width:0; cursor:pointer; }
-        .player-art { width:44px; height:44px; border-radius:8px; overflow:hidden; background:linear-gradient(135deg,#1a1030,#2d1a5e); display:flex; align-items:center; justify-content:center; flex-shrink:0; border:1px solid rgba(255,255,255,0.05); }
+        .player-art { width:44px; height:44px; border-radius:8px; overflow:hidden; background:linear-gradient(135deg,#1a1030,#2d1a5e); display:flex; align-items:center; justify-content:center; flex-shrink:0; border:1px solid rgba(255,255,255,0.05); transition:box-shadow 0.4s; }
         .player-art img { width:100%; height:100%; object-fit:cover; }
-        .player-info { min-width:0; display:flex; flex-direction:column; gap:2px; }
+        .player-art.dj { box-shadow:0 0 0 2px rgba(139,92,246,0.6),0 0 20px rgba(139,92,246,0.4); animation:djPulse 2s ease-in-out infinite; }
+        @keyframes djPulse { 0%,100%{box-shadow:0 0 0 2px rgba(139,92,246,0.6),0 0 20px rgba(139,92,246,0.4)} 50%{box-shadow:0 0 0 2px rgba(167,139,250,0.9),0 0 28px rgba(139,92,246,0.65)} }
+        .player-info { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
         .player-title { font-size:13px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .player-artist { font-size:11px; color:rgba(255,255,255,0.45); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        
+        .player-dj-badge { font-size:9px; font-weight:700; letter-spacing:0.06em; padding:2px 7px; border-radius:20px; background:rgba(139,92,246,0.2); color:#a78bfa; border:1px solid rgba(139,92,246,0.35); flex-shrink:0; }
+
         .player-center { display:flex; flex-direction:column; align-items:center; gap:8px; flex:1; max-width:40%; }
         .player-controls { display:flex; align-items:center; gap:20px; }
-        .player-btn { background:none; border:none; color:rgba(255,255,255,0.4); cursor:pointer; padding:4px; display:flex; align-items:center; transition:color 0.15s, transform 0.15s; }
+        .player-btn { background:none; border:none; color:rgba(255,255,255,0.4); cursor:pointer; padding:4px; display:flex; align-items:center; transition:color 0.15s,transform 0.15s; }
         .player-btn:hover:not(:disabled) { color:#fff; transform:scale(1.08); }
         .player-btn:disabled { opacity:0.25; cursor:not-allowed; }
-        .player-play-btn { width:34px; height:34px; border-radius:50%; background:#fff; color:#000; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:transform 0.15s, box-shadow 0.15s; }
+        .player-play-btn { width:34px; height:34px; border-radius:50%; background:#fff; color:#000; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer; transition:transform 0.15s,box-shadow 0.15s; }
         .player-play-btn:hover { transform:scale(1.05); box-shadow:0 0 12px rgba(255,255,255,0.25); }
-        
+
         .player-timeline { display:flex; align-items:center; gap:10px; width:100%; }
         .player-time { font-size:10px; color:rgba(255,255,255,0.3); width:32px; font-variant-numeric:tabular-nums; }
         .player-time.right { text-align:right; }
@@ -252,71 +268,79 @@ const Player = () => {
         .player-bar-fill { height:100%; background:#fff; }
         .player-thumb { position:absolute; width:10px; height:10px; border-radius:50%; background:#fff; transform:translate(-50%,-0.5px); opacity:0; transition:opacity 0.15s; pointer-events:none; box-shadow:0 2px 4px rgba(0,0,0,0.4); }
         .player-range { position:absolute; left:0; right:0; width:100%; height:16px; opacity:0; cursor:pointer; margin:0; }
-        
+
         .player-right { display:flex; align-items:center; gap:12px; width:30%; justify-content:flex-end; }
         .player-icon-btn { background:none; border:none; color:rgba(255,255,255,0.4); cursor:pointer; padding:4px; display:flex; align-items:center; transition:color 0.15s; }
         .player-icon-btn:hover { color:#fff; }
         .player-icon-btn.dl:hover { color:#10B981; }
         .player-icon-btn.fs:hover { color:#a78bfa; }
 
-        .player-buffering-text { font-size:10px; font-weight:700; letter-spacing:0.08em; color:#a78bfa; animation: pulse-b 1.5s infinite; }
+        .dj-buffering { font-size:10px; font-weight:700; letter-spacing:0.08em; color:#a78bfa; animation:pulse-b 1.5s infinite; }
         @keyframes pulse-b { 0%,100%{opacity:0.6} 50%{opacity:1} }
 
         @media(max-width:640px) {
           .player-center { max-width:50%; }
-          .player-right { display:none; }
-          .player-left { width:45%; }
+          .player-right  { display:none; }
+          .player-left   { width:45%; }
         }
       `}</style>
 
       <div className="player-mini">
+
         {/* LEFT */}
         <div className="player-left" onClick={() => setIsExpanded(true)}>
-          <div className="player-art">
-            {currentSong.artwork ? <img src={currentSong.artwork} alt={currentSong.title} /> : <Music2 size={18} color="rgba(255,255,255,0.2)" />}
+          <div className={`player-art ${djState.active ? 'dj' : ''}`}>
+            {currentSong.artwork
+              ? <img src={currentSong.artwork} alt={currentSong.title}/>
+              : <Music2 size={18} color="rgba(255,255,255,0.2)"/>
+            }
           </div>
           <div className="player-info">
             <div className="player-title">{currentSong.title}</div>
             <div className="player-artist">{currentSong.artist}</div>
           </div>
-          <HeartButton songId={currentSong._id} size={16} />
-          <ChevronUp size={16} color="rgba(255,255,255,0.2)" style={{ marginLeft: 4 }} />
+          {djState.active && <span className="player-dj-badge">DJ</span>}
+          <HeartButton songId={currentSong._id} size={16}/>
+          <ChevronUp size={16} color="rgba(255,255,255,0.2)" style={{marginLeft:4}}/>
         </div>
 
         {/* CENTER */}
         <div className="player-center">
           <div className="player-controls">
-            <button className="player-btn" onClick={handleSkipBack} disabled={djState.mode}>
-              <SkipBack size={16} fill="currentColor" />
+            <button className="player-btn" onClick={handleSkipBack} disabled={djState.active}>
+              <SkipBack size={16} fill="currentColor"/>
             </button>
             <button className="player-play-btn" onClick={togglePlay}>
-              {isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" style={{ marginLeft: 1.5 }} />}
+              {isPlaying
+                ? <Pause size={15} fill="currentColor"/>
+                : <Play  size={15} fill="currentColor" style={{marginLeft:1.5}}/>
+              }
             </button>
             <button className="player-btn" onClick={handleSkipForward}>
-              <SkipForward size={16} fill="currentColor" />
+              <SkipForward size={16} fill="currentColor"/>
             </button>
           </div>
           <div className="player-timeline">
             <span className="player-time">{formatTime(currentTime)}</span>
             <div className="player-bar-wrap">
               <div className="player-bar-track">
-                <div className="player-bar-fill" style={{ width: `${progressPercent}%` }} />
+                <div className="player-bar-fill" style={{width:`${progressPercent}%`}}/>
               </div>
-              <div className="player-thumb" style={{ left: `${progressPercent}%` }} />
+              <div className="player-thumb" style={{left:`${progressPercent}%`}}/>
               <input
                 type="range" className="player-range"
                 min={0} max={duration || 0} value={currentTime}
-                onChange={(e: any) => handleSeek(Number(e.target.value))}
-                onInput={(e: any) => {
-                  setIsDragging(true);
-                  setCurrentTime(Number(e.target.value));
-                }}
+                onChange={(e:any) => handleSeek(Number(e.target.value))}
+                onInput={(e:any) => { setIsDragging(true); setCurrentTime(Number(e.target.value)); }}
                 onMouseUp={() => setIsDragging(false)}
                 onTouchEnd={() => setIsDragging(false)}
               />
             </div>
             <span className="player-time right">
-              {isBuffering ? <span className="player-buffering-text">DJ...</span> : formatTime(duration)}
+              {(isBuffering && djState.active)
+                ? <span className="dj-buffering">DJ...</span>
+                : formatTime(duration)
+              }
             </span>
           </div>
         </div>
@@ -327,25 +351,25 @@ const Player = () => {
             <Maximize2 size={17}/>
           </button>
           <button className="player-icon-btn dl" onClick={handleDownload} title="Descargar">
-            <Download size={17} />
+            <Download size={17}/>
           </button>
           <button className="player-icon-btn" onClick={toggleMute}>
-            {isMuted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+            {isMuted || volume === 0 ? <VolumeX size={17}/> : <Volume2 size={17}/>}
           </button>
-          <div className="player-bar-wrap" style={{ width: '88px' }}>
+          <div className="player-bar-wrap" style={{width:'88px'}}>
             <div className="player-bar-track">
-              <div className="player-bar-fill" style={{ width: `${volDisplay}%` }} />
+              <div className="player-bar-fill" style={{width:`${volDisplay}%`}}/>
             </div>
-            <div className="player-thumb" style={{ left: `${volDisplay}%` }} />
+            <div className="player-thumb" style={{left:`${volDisplay}%`}}/>
             <input
               type="range" className="player-range"
               min={0} max={100} value={volDisplay}
-              onChange={(e: any) => handleVolumeChange(Number(e.target.value))}
+              onChange={(e:any) => handleVolumeChange(Number(e.target.value))}
             />
           </div>
         </div>
 
-        {/* Elemento de Audio Nativo */}
+        {/* AUDIO */}
         <audio
           ref={audioRef}
           key={currentSong.driveId}
@@ -358,24 +382,19 @@ const Player = () => {
           onEnded={handleEnded}
         />
 
-        {/* Modal de Vista Expandida */}
+        {/* EXPANDED */}
         {isExpanded && (
           <ExpandedPlayer
             song={currentSong}
-            queue={queue}
+            queue={djState.active ? djState.queue : queue}
             queueMeta={meta}
             onClose={() => setIsExpanded(false)}
             onSelectSong={(s) => {
-              if (djState.mode) endDJ(); // Salir del modo DJ si el usuario fuerza un cambio manual
-              historyRef.current = [...historyRef.current, currentSong];
-              setCurrentSong(s);
-              setPlaying(true);
+              if (djState.active) endDJ();
+              goToSong(s);
             }}
             onDownload={handleDownload}
-            onFullscreen={() => {
-              setIsExpanded(false);
-              setIsFullscreen(true);
-            }}
+            onFullscreen={() => { setIsExpanded(false); setIsFullscreen(true); }}
             currentTime={currentTime}
             duration={duration}
             isMuted={isMuted}
@@ -385,39 +404,35 @@ const Player = () => {
             onToggleMute={toggleMute}
             onSkipBack={handleSkipBack}
             onSkipForward={handleSkipForward}
-            // Props de DJ IA propagadas al ExpandedPlayer
-            djMode={djState.mode}
+            djMode={djState.active}
             djNarration={djState.narration}
             djMood={djState.mood}
             djLoading={djState.loading}
-            onDJStart={startDJ}
-            onDJEnd={endDJ}
+            onDJStart={handleDJStart}
+            onDJEnd={handleDJEnd}
           />
         )}
 
-        {/* Portal de Vista Fullscreen */}
-        {isFullscreen &&
-          createPortal(
-            <FullscreenPlayer
-              song={currentSong}
-              isPlaying={isPlaying}
-              currentTime={currentTime}
-              duration={duration}
-              onClose={() => setIsFullscreen(false)}
-              onTogglePlay={togglePlay}
-              onSeek={handleSeek}
-              onSkipBack={handleSkipBack}
-              onSkipForward={handleSkipForward}
-            />,
-            document.body
-          )
-        }
+        {/* FULLSCREEN */}
+        {isFullscreen && createPortal(
+          <FullscreenPlayer
+            song={currentSong}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            onClose={() => setIsFullscreen(false)}
+            onTogglePlay={togglePlay}
+            onSeek={handleSeek}
+            onSkipBack={handleSkipBack}
+            onSkipForward={handleSkipForward}
+          />,
+          document.body,
+        )}
       </div>
     </>
   );
 };
 
-// ── Helpers ───────────────────────────────────────────
 function formatTime(t: number): string {
   if (!t || isNaN(t) || !isFinite(t)) return '0:00';
   const m = Math.floor(t / 60);
