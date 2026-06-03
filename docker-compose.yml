@@ -121,17 +121,17 @@ services:
 
 # ── INGESTOR ──────────────────────────────────────
 
-  # ingestor:
+  #ingestor:
   #   build: ./services/ingestor
   #   container_name: echofy-ingestor
-  #   # Sin ports: solo accesible internamente
+     # Sin ports: solo accesible internamente
   #   volumes:
   #     - ./services/ingestor:/app
   #     - ./services/ingestor/downloads:/app/downloads
   #     - ./services/ingestor/service-account.json:/app/service-account.json
   #   env_file:
   #     - ./services/ingestor/.env
-  #   restart: unless-stopped
+  #restart: unless-stopped
 
 # ── AI DJ SERVICE 8090 ─────────────────────────────────
   ai:
