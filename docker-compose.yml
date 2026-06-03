@@ -121,17 +121,17 @@ services:
 
 # ── INGESTOR ──────────────────────────────────────
 
-  ingestor:
-    build: ./services/ingestor
-    container_name: echofy-ingestor
-    # Sin ports: solo accesible internamente
-    volumes:
-      - ./services/ingestor:/app
-      - ./services/ingestor/downloads:/app/downloads
-      - ./services/ingestor/service-account.json:/app/service-account.json
-    env_file:
-      - ./services/ingestor/.env
-    restart: unless-stopped
+  # ingestor:
+  #   build: ./services/ingestor
+  #   container_name: echofy-ingestor
+  #   # Sin ports: solo accesible internamente
+  #   volumes:
+  #     - ./services/ingestor:/app
+  #     - ./services/ingestor/downloads:/app/downloads
+  #     - ./services/ingestor/service-account.json:/app/service-account.json
+  #   env_file:
+  #     - ./services/ingestor/.env
+  #   restart: unless-stopped
 
 # ── AI DJ SERVICE 8090 ─────────────────────────────────
   ai:
@@ -171,7 +171,3 @@ services:
     restart: always
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - echofy-network # Asegúrate de que use la misma red que tus otros contenedores
