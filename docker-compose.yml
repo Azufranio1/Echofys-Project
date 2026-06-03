@@ -169,5 +169,5 @@ services:
     image: redis:7-alpine
     container_name: redis-ai
     restart: always
-    ports:
-      - "6379:6379"
+    #ports:
+    #  - "6379:6379"
