@@ -9,7 +9,7 @@ import ExpandedPlayer from './ExpandedPlayer';
 import FullscreenPlayer from './FullscreenPlayer';
 import HeartButton from './HeartButton';
 import { useQueue } from '../hooks/useQueue';
-import { useDJSession, type ListenSignal } from '../hooks/useDJSession';
+import { useDJSession, type ListenSignal } from '../hooks/usedjsessions';
 import { API, authHeaders } from '../lib/api';
 
 const Player = () => {
