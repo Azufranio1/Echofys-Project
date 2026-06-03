@@ -277,56 +277,6 @@ export const getHomeSections = async (req: Request, res: Response) => {
 export const listenSignal = async (req: Request, res: Response) => {
   try {
     const userId = req.user.id;
-    const { songId, signal, progressPct = 100 } = req.body;
- 
-    if (!songId || !signal) {
-      return res.status(400).json({ message: 'songId y signal son requeridos' });
-    }
- 
-    const validSignals = ['completed', 'skipped_early', 'skipped_mid'];
-    if (!validSignals.includes(signal)) {
-      return res.status(400).json({ message: `signal debe ser uno de: ${validSignals.join(', ')}` });
-    }
- 
-    // Notificar al AI service de forma asíncrona (no bloquear la respuesta)
-    notifyAISignal(userId, songId, signal, progressPct, req.headers.authorization || '');
- 
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('listenSignal error:', err);
-    return res.status(500).json({ message: 'Error al registrar señal' });
-  }
-};
- 
-/**
- * Notifica al AI service sobre la señal de comportamiento.
- * Corre en background — si falla, no afecta al player.
- */
-const notifyAISignal = async (
-  userId: string,
-  songId: string,
-  signal: string,
-  progressPct: number,
-  authorization: string,
-) => {
-  try {
-    const AI_URL = process.env.AI_SERVICE_URL || 'http://echofy-ai:3000';
-    await fetch(`${AI_URL}/api/ai/dj/signal`, {
-      method:  'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authorization,
-      },
-      body: JSON.stringify({ songId, signal, progressPct }),
-    });
-  } catch {
-    // Silenciar — el AI service puede no estar disponible
-  }
-};
-
-export const listenSignal = async (req: Request, res: Response) => {
-  try {
-    const userId = req.user.id;
     const { songId, signal, progressPct = 100, elapsedSeconds, djSessionId } = req.body;
  
     if (!songId || !signal) {
