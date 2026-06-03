@@ -38,7 +38,7 @@ const Player = () => {
   const sendListenSignal = useCallback(async (signal: ListenSignal, elapsedSec: number) => {
     if (!listenSongId.current) return;
     try {
-      await fetch(`${API.songs}/listen-signal`, {
+      await fetch(`${API.player}/listen-signal`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
@@ -184,6 +184,22 @@ const Player = () => {
       historyRef.current = historyRef.current.slice(0, -1);
       setCurrentSong(prev);
       setPlaying(true);
+    }
+  };
+
+  const sendListenSignal = async (
+    songId: string,
+    signal: 'completed' | 'skipped_early' | 'skipped_mid',
+    progressPct: number,
+  ) => {
+    try {
+      await fetch(`${API.player}/listen-signal`, {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({ songId, signal, progressPct }),
+      });
+    } catch {
+      // Silenciar — no crítico
     }
   };
 
