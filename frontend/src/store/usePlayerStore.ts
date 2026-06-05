@@ -15,6 +15,8 @@ interface PlayerState {
   currentSong: Song | null;
   isPlaying: boolean;
   queue: Song[];
+  isRepeating: boolean;
+  toggleRepeat: () => void;
   // Acciones para cambiar el estado
   setCurrentSong: (song: Song) => void;
   togglePlay: () => void;
@@ -26,6 +28,9 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   currentSong: null,
   isPlaying: false,
   queue: [],
+  isRepeating: false,
+
+  toggleRepeat: () => set(state => ({ isRepeating: !state.isRepeating })),
 
   // Al elegir una canción, la ponemos como actual y activamos el play
   setCurrentSong: (song) => set({ 
