@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { usePlayerStore } from '../store/usePlayerStore';
 import {
   Play, Pause, SkipBack, SkipForward,
-  Volume2, VolumeX, Music2, Download, ChevronUp, Maximize2
+  Volume2, VolumeX, Music2, Download, ChevronUp, Maximize2, Repeat
 } from 'lucide-react';
 import ExpandedPlayer from './ExpandedPlayer';
 import FullscreenPlayer from './FullscreenPlayer';
@@ -13,7 +13,7 @@ import { useDJSession, type ListenSignal } from '../hooks/usedjsessions';
 import { API, authHeaders } from '../lib/api';
 
 const Player = () => {
-  const { currentSong, isPlaying, togglePlay, setCurrentSong, setPlaying } = usePlayerStore();
+  const { currentSong, isPlaying, togglePlay, setCurrentSong, setPlaying, isRepeating, toggleRepeat } = usePlayerStore();
   const { queue, meta, registerPlay, loadQueue, getNext } = useQueue();
   const { djState, startDJ, nextDJ, endDJ } = useDJSession();
 
@@ -127,6 +127,11 @@ const Player = () => {
 
   // ── Canción terminó ──────────────────────────────────
   const handleEnded = async () => {
+    if (isRepeating && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(() => {});
+      return;
+    };
     if (djState.active) {
       const next = pendingDJSong.current;
       pendingDJSong.current = null;
@@ -319,6 +324,14 @@ const Player = () => {
             <button className="player-btn" onClick={handleSkipForward}>
               <SkipForward size={16} fill="currentColor"/>
             </button>
+            <button
+              className="player-btn"
+              onClick={toggleRepeat}
+              title={isRepeating ? 'Repetir: activado' : 'Repetir: desactivado'}
+              style={{ color: isRepeating ? '#a78bfa' : 'rgba(255,255,255,0.4)' }}
+            >
+              <Repeat size={16}/>
+            </button>
           </div>
           <div className="player-timeline">
             <span className="player-time">{formatTime(currentTime)}</span>
@@ -402,8 +415,11 @@ const Player = () => {
             onSeek={handleSeek}
             onVolumeChange={handleVolumeChange}
             onToggleMute={toggleMute}
+            onTogglePlay={togglePlay}
             onSkipBack={handleSkipBack}
             onSkipForward={handleSkipForward}
+            onTogglePlay={togglePlay}
+            onToggleRepeat={toggleRepeat}
             djMode={djState.active}
             djNarration={djState.narration}
             djMood={djState.mood}

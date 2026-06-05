@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ChevronDown, Music2, Play, Pause, SkipBack, SkipForward,
          Volume2, VolumeX, Download, Users, Mic2, Clock, Compass,
-         AlignLeft, ListMusic, Loader2, Disc3, Send, X, Maximize2 } from 'lucide-react';
+         AlignLeft, ListMusic, Loader2, Disc3, Send, X, Maximize2, Repeat } from 'lucide-react';
 import { usePlayerStore } from '../store/usePlayerStore';
 import HeartButton from './HeartButton';
 import type { QueueMeta } from '../hooks/useQueue';
@@ -24,6 +24,8 @@ interface Props {
   onToggleMute: () => void;
   onSkipBack: () => void;
   onSkipForward: () => void;
+  onTogglePlay: () => void;
+  onToggleRepeat: () => void;
   // DJ props
   djMode: boolean;
   djNarration: string;       // última frase del DJ
@@ -417,10 +419,10 @@ const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, cur
 const ExpandedPlayer = ({
   song, queue, queueMeta, onClose, onSelectSong, onDownload, onFullscreen,
   currentTime, duration, isMuted, volume,
-  onSeek, onVolumeChange, onToggleMute, onSkipBack, onSkipForward,
+  onSeek, onVolumeChange, onToggleMute, onSkipBack, onSkipForward, onTogglePlay, onToggleRepeat,
   djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd,
 }: Props) => {
-  const { isPlaying, togglePlay } = usePlayerStore();
+  const { isPlaying, isRepeating } = usePlayerStore();
   const prog       = duration > 0 ? (currentTime / duration) * 100 : 0;
   const volDisplay = isMuted ? 0 : volume;
 
@@ -729,10 +731,18 @@ const ExpandedPlayer = ({
           <div className="exp-bar-center">
             <div className="exp-bar-controls">
               <button className="exp-bar-btn" onClick={onSkipBack}><SkipBack size={17} fill="currentColor"/></button>
-              <button className={`exp-bar-play ${isPlaying?'playing':''}`} onClick={togglePlay}>
+              <button className={`exp-bar-play ${isPlaying?'playing':''}`} onClick={onTogglePlay}>
                 {isPlaying ? <Pause size={15} fill="white"/> : <Play size={15} fill="white" style={{marginLeft:2}}/>}
               </button>
               <button className="exp-bar-btn" onClick={onSkipForward}><SkipForward size={17} fill="currentColor"/></button>
+              <button
+              className="player-btn"
+              onClick={onToggleRepeat}
+              title={isRepeating ? 'Repetir: activado' : 'Repetir: desactivado'}
+              style={{ color: isRepeating ? '#a78bfa' : 'rgba(255,255,255,0.4)' }}
+            >
+              <Repeat size={16}/>
+            </button>
             </div>
             <div className="exp-bar-prog">
               <span className="exp-bar-time">{fmt(currentTime)}</span>
