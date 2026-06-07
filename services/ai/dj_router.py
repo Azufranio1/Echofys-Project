@@ -32,7 +32,7 @@ dj_router = APIRouter(prefix="/api/ai/dj", tags=["DJ"])
 
 # ── Config (heredada del entorno) ──────────────────────
 OLLAMA_URL  = os.getenv("OLLAMA_URL",  "http://ollama:11434")
-MODEL_MAIN  = os.getenv("MODEL_MAIN",  "llama3.2:3b")
+MODEL_MAIN  = os.getenv("MODEL_MAIN",  "gemma2:2b")
 MODEL_LIGHT = os.getenv("MODEL_LIGHT", "gemma2:2b")
 REDIS_URL   = os.getenv("REDIS_AI_URL","redis://redis-ai:6379")
 MONGO_URI   = os.getenv("MONGO_URI")
