@@ -31,6 +31,25 @@ export const createSong = async (req: Request, res: Response) => {
   }
 };
 
+// 2.5 Obtener canciones aleatorias 
+export const getRandomSongs = async (req: Request, res: Response) => {
+  const limit = parseInt(req.query.limit as string) || 8;
+  const cacheKey = CACHE_KEYS.randomSongs(limit);
+  try {
+    const cached = await cacheGet<any[]>(cacheKey);
+    if (cached) return res.json(cached);
+
+    const songs = await Music.aggregate([
+      { $match: { status: { $regex: /^\s*complete\s*$/i } } },
+      { $sample: { size: Math.min(limit, 100) } }
+    ]);
+    await cacheSet(cacheKey, songs, TTL.allSongs);
+    res.json(songs);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener canciones aleatorias' });
+  }
+};
+
 // 3. Streaming desde Drive
 export const streamSong = async (req: Request, res: Response) => {
   const { driveId } = req.params;

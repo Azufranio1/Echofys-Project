@@ -171,3 +171,17 @@ services:
     restart: always
     #ports:
     #  - "6379:6379"
+
+  subscriptions:
+    build: ./services/subscriptions
+    container_name: echofy-subscriptions
+    ports:
+      - "8088:3000"
+    volumes:
+      - ./services/subscriptions:/app
+      - /app/node_modules
+    env_file:
+      - ./services/subscriptions/.env
+    depends_on:
+      - redis
+    restart: unless-stopped

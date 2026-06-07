@@ -1,0 +1,24 @@
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Pago {
+  pago_id         Int       @id @default(autoincrement())
+  usuario_id      String
+  plan_id         Int
+  codigo_ref      String    @unique
+  monto           Decimal   @db.Decimal(10, 2)
+  estado          String    @default("pendiente")
+  comprobante_url String?
+  fecha_creacion  DateTime  @default(now())
+  fecha_pago      DateTime?
+  expira_en       DateTime
+  suscripcion_id  Int?
+
+  @@map("pagos")
+}

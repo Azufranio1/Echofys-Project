@@ -31,7 +31,20 @@ export const createSong = async (req: Request, res: Response) => {
   }
 };
 
-// 3. Streaming desde Drive
+// 3. Canción aleatoria para usuarios gratuitos
+export const getRandomSongs = async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 8;
+    const songs = await Music.find({ status: { $regex: /^\s*complete\s*$/i } }).limit(1000);
+
+    const shuffled = songs.sort(() => Math.random() - 0.5).slice(0, limit);
+    res.json(shuffled);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener canciones aleatorias' });
+  }
+};
+
+// 4. Streaming desde Drive
 export const streamSong = async (req: Request, res: Response) => {
   const { driveId } = req.params;
   const isDownload = req.query.download === 'true'; // Detectamos si es descarga
@@ -47,7 +60,7 @@ export const streamSong = async (req: Request, res: Response) => {
       const stream = await drive.files.get({ fileId: driveId, alt: 'media' }, { responseType: 'stream' });
       return stream.data.pipe(res);
     }
-    
+
     const range = req.headers.range;
 
     if (range) {

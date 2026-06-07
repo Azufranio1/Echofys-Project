@@ -6,6 +6,7 @@ const router = Router();
 
 // Público: Cualquiera puede ver el catálogo y escuchar
 router.get('/', songController.getAllSongs);
+router.get('/random', songController.getRandomSongs);
 router.get('/stream/:driveId', songController.streamSong);
 
 // Protegido: Solo usuarios con Token pueden agregar canciones

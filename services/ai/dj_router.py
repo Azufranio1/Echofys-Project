@@ -7,6 +7,7 @@ Se monta en main.py con: app.include_router(dj_router)
 Endpoints:
   POST /api/ai/dj/start        → inicia sesión DJ con mood del usuario
   POST /api/ai/dj/next         → siguiente canción + narración de transición
+  POST /api/ai/dj/queue        → pre-carga cola de canciones para el cliente
   GET  /api/ai/dj/session      → estado actual de la sesión
   DELETE /api/ai/dj/session    → termina la sesión DJ
 """
@@ -67,7 +68,7 @@ async def call_ollama(model: str, prompt: str, system: str = "", as_json: bool =
     if system:
         payload["system"] = system
         
-    async with httpx.AsyncClient(timeout=120.0) as c:
+    async with httpx.AsyncClient(timeout=300.0) as c:
         r = await c.post(f"{OLLAMA_URL}/api/generate", json=payload)
         r.raise_for_status()
         return r.json()["response"].strip()
@@ -415,6 +416,45 @@ async def dj_session(authorization: str = Header(...)):
         "current_song":  session.get("current_song"),
         "genres_hint":   session.get("genres_hint", []),
     }
+
+
+@dj_router.post("/queue")
+async def dj_queue(req: DJNextRequest, authorization: str = Header(...)):
+    """Devuelve un lote de canciones para pre-cargar la cola local del cliente."""
+    payload = decode_token(authorization)
+    user_id = payload.get("id")
+
+    session = await get_session(user_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail="No hay sesión DJ activa. Inicia una con /dj/start"
+        )
+
+    # Ajustar energía según señal
+    energy_target = session.get("energy_target", 5)
+    if req.listen_signal == "completed":
+        energy_target = min(9, energy_target + 1)
+    elif req.listen_signal == "skipped_early":
+        energy_target = max(1, energy_target - 1)
+
+    # Obtener candidatos excluidos en esta sesión
+    played_ids = session.get("played_ids", [])
+    candidates = await get_candidates(
+        exclude_ids=played_ids,
+        energy_target=energy_target,
+        genres_hint=session.get("genres_hint", []),
+        limit=25,
+    )
+
+    if not candidates:
+        return {"songs": []}
+
+    # Devolver N canciones de la cola (sin generación de IA, solo música)
+    queue_count = req.progress_pct if isinstance(req.progress_pct, int) else 10
+    queue_count = min(queue_count, len(candidates))
+
+    return {"songs": candidates[:queue_count]}
 
 
 @dj_router.delete("/session")

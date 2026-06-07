@@ -1,7 +1,9 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Player from './Player';
-import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight, BarChart2, X } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight, BarChart2, X, Crown } from 'lucide-react';
+import AdBanner from './AdBanner';
+import { usePremium } from '../hooks/usePremium';
 
 interface MainLayoutProps {
   onLogout: () => void;
@@ -10,11 +12,12 @@ interface MainLayoutProps {
 export type SearchContextType = { searchQuery: string };
 
 const NAV_ITEMS = [
-  { to: '/',          icon: Home,      label: 'Inicio'    },
-  { to: '/recent',    icon: Clock,     label: 'Recientes' },
-  { to: '/favorites', icon: Heart,     label: 'Favoritos' },
-  { to: '/playlists', icon: ListMusic, label: 'Playlists' },
-  { to: '/stats',     icon: BarChart2, label: 'Tu Ritmo'  },
+  { to: '/',         icon: Home,      label: 'Inicio'       },
+  { to: '/recent',   icon: Clock,     label: 'Recientes'    },
+  { to: '/favorites',icon: Heart,     label: 'Favoritos'    },
+  { to: '/playlists',icon: ListMusic, label: 'Playlists'    },
+  { to: '/stats',    icon: BarChart2, label: 'Tu Ritmo'     },
+  { to: '/subscriptions', icon: Crown, label: 'Suscripciones' },
 ];
 
 const MainLayout = ({ onLogout }: MainLayoutProps) => {
@@ -24,6 +27,7 @@ const MainLayout = ({ onLogout }: MainLayoutProps) => {
   const navigate  = useNavigate();
   const location  = useLocation();
   const inputRef  = useRef<HTMLInputElement>(null);
+  const { isPremium } = usePremium();
 
   // Cuando el usuario escribe → navegar a Home si no está ahí
   const handleSearch = (value: string) => {
@@ -210,6 +214,9 @@ const MainLayout = ({ onLogout }: MainLayoutProps) => {
           {/* MAIN */}
           <main className="echofy-main">
             <div className="echofy-content">
+              {/* Aquí se mostrará el Banner SOLO si el usuario NO es premium */}
+              {!isPremium && <AdBanner position="top"/>}
+              
               <Outlet context={{ searchQuery } satisfies SearchContextType}/>
             </div>
           </main>

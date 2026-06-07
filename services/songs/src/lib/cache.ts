@@ -43,6 +43,7 @@ export const CACHE_KEYS = {
   homeData:   (userId: string) => `user:home:${userId}`,
   globalTop:  ()               => `global:top20`,
   allSongs:   ()               => `songs:all`,
+  randomSongs: (limit: number) => `songs:random:${limit}`,
 };
 
 // ── TTLs en segundos ──

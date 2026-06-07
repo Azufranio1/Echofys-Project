@@ -8,7 +8,7 @@ import {
 import ExpandedPlayer from './ExpandedPlayer';
 import FullscreenPlayer from './FullscreenPlayer';
 import HeartButton from './HeartButton';
-import { useQueue } from '../hooks/useQueue';
+import { useQueue } from '../hooks/Usequeue';
 import { useDJSession, type ListenSignal } from '../hooks/usedjsessions';
 import { API, authHeaders } from '../lib/api';
 
@@ -41,17 +41,31 @@ const Player = () => {
     setIsBuffering(false);
   }, [currentSong, setCurrentSong, setPlaying]);
 
-  // ── Señal de escucha → player backend ───────────────
+
+  // ── Señal de escucha → player  ───────────────
   const sendListenSignal = useCallback(async (
-    songId:      string,
+    songData:    any, // Cambiado temporalmente a any para interceptar objetos
     signal:      ListenSignal,
     progressPct: number,
   ) => {
     try {
+      // 1. Asegurar que extraemos el ID string (por si nos pasan la canción completa)
+      const actualSongId = songData?._id ?? songData;
+
+      // 2. Prevenir que se envíe NaN o Infinity si la duración era 0
+      const safeProgress = Number.isFinite(progressPct) ? Math.round(progressPct) : 0;
+
+      // Evitamos hacer la petición si por alguna razón no hay ID
+      if (!actualSongId) return;
+
       await fetch(`${API.player}/listen-signal`, {
         method:  'POST',
         headers: authHeaders(),
-        body:    JSON.stringify({ songId, signal, progressPct }),
+        body:    JSON.stringify({ 
+          songId: actualSongId, 
+          signal, 
+          progressPct: safeProgress 
+        }),
       });
     } catch {
       // No crítico
@@ -151,9 +165,10 @@ const Player = () => {
     }
 
     // Modo normal
-    const next = getNext();
+    setIsBuffering(true);
+    const next = await getNext(currentSong);
     if (next) goToSong(next);
-    else setPlaying(false);
+    else setIsBuffering(false);
   };
 
   // ── Skip forward ─────────────────────────────────────
@@ -172,8 +187,10 @@ const Player = () => {
       return;
     }
 
-    const next = getNext();
+    setIsBuffering(true);
+    const next = await getNext(currentSong);
     if (next) goToSong(next);
+    else setIsBuffering(false);
   };
 
   // ── Skip back ────────────────────────────────────────

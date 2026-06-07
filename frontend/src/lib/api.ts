@@ -9,6 +9,7 @@ export const API = {
   stats:     `${HOST}:8086/api/stats`,
   lyrics: `${HOST}:8087/lyrics`,
   ai: `${HOST}:8090/api/ai`,
+  subscriptions: `${HOST}:8088`,
 } as const;
 
 // Helper headers con token
