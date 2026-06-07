@@ -25,6 +25,7 @@ import redis.asyncio as aioredis
 import motor.motor_asyncio
 import json, os, re, jwt as pyjwt 
 from dotenv import load_dotenv
+from semantic_search import semantic_search, explain_results
 
 from dj_router import dj_router
 
@@ -61,7 +62,8 @@ app.include_router(dj_router)
 
 # ── Configuración ──────────────────────────────────────
 OLLAMA_URL  = os.getenv("OLLAMA_URL",  "http://ollama:11434")
-MODEL_MAIN  = os.getenv("MODEL_MAIN",  "llama3.2:3b")
+# MODEL_MAIN  = os.getenv("MODEL_MAIN",  "llama3.2:3b")
+MODEL_MAIN  = os.getenv("MODEL_MAIN",  "gemma2:2b")
 MODEL_LIGHT = os.getenv("MODEL_LIGHT", "gemma2:2b")
 REDIS_URL   = os.getenv("REDIS_AI_URL","redis://redis-ai:6379")
 MONGO_URI   = os.getenv("MONGO_URI")
@@ -114,7 +116,7 @@ async def call_ollama(model: str, prompt: str, system: str = "", as_json: bool =
     if system:
         payload["system"] = system
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
         resp.raise_for_status()
         return resp.json()["response"].strip()
@@ -186,10 +188,95 @@ class IngestRequest(BaseModel):
 class RecentSongPayload(BaseModel):
     song: dict   # { _id, title, artist, genre, artwork, driveId }
 
+class SemanticSearchRequest(BaseModel):
+    query:   str
+    limit:   int = 5
+    explain: bool = True   # si False, devuelve resultados sin explicación del modelo
+
 
 # ══════════════════════════════════════════════════════
 #  Endpoints
 # ══════════════════════════════════════════════════════
+
+@app.on_event("startup")
+async def warmup_models():
+    """
+    Pre-carga gemma2:2b en VRAM al arrancar.
+    Reintenta hasta 5 veces con espera entre intentos
+    para dar tiempo a que Ollama cargue el modelo.
+    """
+    import asyncio
+    await asyncio.sleep(10)  # esperar arranque completo de uvicorn
+
+    print("🔥 Calentando gemma2:2b en Ollama...")
+
+    for attempt in range(1, 6):
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                resp = await client.post(
+                    f"{OLLAMA_URL}/api/generate",
+                    json={
+                        "model":      MODEL_MAIN,
+                        "prompt":     "hola",
+                        "stream":     False,
+                        "keep_alive": "24h",   # mantener 24h en VRAM
+                    }
+                )
+                if resp.status_code == 200:
+                    print(f"✅ {MODEL_MAIN} cargado en VRAM (intento {attempt})")
+                    return
+                else:
+                    print(f"⚠️  Intento {attempt}: status {resp.status_code}, reintentando...")
+        except Exception as e:
+            print(f"⚠️  Intento {attempt} falló: {e}")
+
+        await asyncio.sleep(30)  # esperar 30s entre intentos
+
+    print("⚠️  Warmup no completado — el modelo cargará en la primera petición")
+
+@app.post("/api/ai/search/semantic")
+async def search_semantic(req: SemanticSearchRequest, authorization: str = Header(...)):
+    """
+    Búsqueda semántica de canciones por contenido emocional/temático de las letras.
+    
+    Ejemplos de queries:
+      - "canciones de aceptación tras una ruptura"
+      - "algo que hable de soledad pero con esperanza"
+      - "letra que mencione viajes y libertad"
+      - "tono melancólico pero energético"
+    
+    Solo devuelve canciones que tienen lyrics_embedding en la BD.
+    Las demás canciones (sin letras vectorizadas) no aparecen aquí —
+    usar /api/ai/search para búsqueda por metadata.
+    """
+    decode_token(authorization)
+
+    # Búsqueda semántica
+    results = await semantic_search(
+        db         = db,
+        query      = req.query,
+        ollama_url = OLLAMA_URL,
+        limit      = req.limit,
+        min_similarity = 0.3,
+    )
+
+    # Explicación del modelo (opcional, tarda ~2s extra)
+    explanation = ""
+    if req.explain and results:
+        explanation = await explain_results(
+            query      = req.query,
+            results    = results,
+            ollama_url = OLLAMA_URL,
+            model      = MODEL_LIGHT,
+        )
+
+    return {
+        "query":       req.query,
+        "results":     results,
+        "explanation": explanation,
+        "count":       len(results),
+        "note":        "Solo canciones con letras vectorizadas" if len(results) < req.limit else "",
+    }
 
 @app.get("/health")
 async def health():
