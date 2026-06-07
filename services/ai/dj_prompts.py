@@ -1,51 +1,26 @@
 """
-Echofy DJ — Prompts controlados
-─────────────────────────────────
-Dos prompts con salida JSON estricta.
-El modelo ligero (gemma2:2b) infiere energía del género.
-El modelo principal (llama3.2:3b) genera la narración del DJ.
+Echofy DJ — Prompts controlados (v2)
+──────────────────────────────────────
+Ahora incluye audioFeatures (vibeTag, energyLevel, tempoBPM)
+y semanticAnalysis (mainTheme, emotionalTone) en los prompts
+para que el modelo pueda elegir semánticamente.
 """
 
-# ══════════════════════════════════════════════════════
-#  Mapa de energía por género
-#  El DJ lo usa para inferir BPM/intensidad sin campo explícito
-# ══════════════════════════════════════════════════════
-
+# ── Mapa de energía por género (fallback sin audioFeatures) ──
 GENRE_ENERGY = {
-    # Alta energía
-    "metal":        9,
-    "hard rock":    8,
-    "punk":         8,
-    "electronic":   7,
-    "dance":        7,
-    "reggaeton":    7,
-    "hip-hop":      6,
-    "hiphop":       6,
-    "pop":          6,
-    # Media energía
-    "alternative":  5,
-    "rock":         5,
-    "indie rock":   5,
-    "r&b/soul":     4,
-    "r&b":          4,
-    "indie":        4,
-    "afrobeats":    6,
-    # Baja energía
-    "jazz":         3,
-    "classical":    2,
-    "acoustic":     2,
-    "folk":         2,
-    "ambient":      1,
+    "metal":       9, "hard rock":  8, "punk":       8,
+    "electronic":  7, "dance":      7, "reggaeton":  7,
+    "hip-hop":     6, "hiphop":     6, "pop":        6,
+    "alternative": 5, "rock":       5, "indie rock": 5,
+    "r&b/soul":    4, "r&b":        4, "indie":      4,
+    "afrobeats":   6, "jazz":       3, "classical":  2,
+    "acoustic":    2, "folk":       2, "ambient":    1,
 }
 
 def get_energy(genre: str) -> int:
-    """Devuelve el nivel de energía (1-9) de un género."""
-    if not genre:
-        return 5
-    return GENRE_ENERGY.get(genre.lower().strip(), 5)
+    return GENRE_ENERGY.get((genre or "").lower().strip(), 5)
 
 def energy_label(level: int) -> str:
-    """Convierte el nivel numérico a etiqueta descriptiva."""
     if level >= 8: return "muy alta energía"
     if level >= 6: return "energía alta"
     if level >= 4: return "energía media"
@@ -53,132 +28,134 @@ def energy_label(level: int) -> str:
     return "ambiente relajado"
 
 
+def _song_line(s: dict) -> str:
+    """
+    Genera una línea descriptiva de una canción para el prompt.
+    Incluye audioFeatures y semanticAnalysis si existen.
+    """
+    af  = s.get("audioFeatures") or {}
+    sem = s.get("semanticAnalysis") or {}
+
+    # Energía: usar audioFeatures si existe, si no inferir del género
+    energy_raw = af.get("energyLevel", "")
+    energy_map = {"low": 2, "medium": 5, "high": 8}
+    energy_num = energy_map.get(energy_raw, get_energy(s.get("genre", "")))
+    vibe       = af.get("vibeTag", "")
+    bpm        = af.get("tempoBPM", "")
+
+    # Análisis semántico
+    theme      = sem.get("mainTheme", "")
+    emotions   = ", ".join(sem.get("emotionalTone", []))
+    metaphors  = "; ".join(sem.get("keyMetaphors", []))
+
+    line = (
+        f'- id:{s["_id"]} | "{s["title"]}" de {s["artist"]}'
+        f' | Género: {s.get("genre","?")} | {energy_label(energy_num)}'
+    )
+    if vibe:       line += f' | Vibe: {vibe}'
+    if bpm:        line += f' | BPM: {bpm}'
+    if theme:      line += f' | Tema: {theme}'
+    if emotions:   line += f' | Emociones: {emotions}'
+    if metaphors:  line += f' | Metáforas: {metaphors}'
+
+    return line
+
+
 # ══════════════════════════════════════════════════════
 #  PROMPT 1 — Inicio de sesión DJ
-#  Modelo: llama3.2:3b
-#  Input:  mood del usuario + lista de canciones candidatas
-#  Output: JSON con primera canción + presentación del DJ
 # ══════════════════════════════════════════════════════
 
-DJ_START_SYSTEM = """Eres Echofy DJ, el DJ personal del usuario dentro de la app Echofy.
-Tu personalidad: carismático, cercano, musical. Hablas en primera persona como DJ.
-Usas máximo 1-2 frases por transición. Nunca más.
+DJ_START_SYSTEM = """Eres Echofy DJ, el DJ personal del usuario.
+Tu personalidad: carismático, cercano, musical. Hablas en primera persona.
+Usas máximo 1-2 frases por narración. Nunca más.
 
-REGLA CRÍTICA: Responde ÚNICAMENTE con un objeto JSON válido.
-Sin texto antes ni después. Sin markdown. Sin explicaciones fuera del JSON.
+INSTRUCCIÓN CRÍTICA: Debes elegir la canción que mejor encaje con el mood
+del usuario usando TODOS los datos disponibles: género, vibe, tema de letra,
+tono emocional y metáforas. NO elijas al azar.
 
-Formato de respuesta obligatorio:
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
 {
   "song_id": "id exacto de la canción elegida",
-  "intro": "frase de presentación del DJ para abrir la sesión (1-2 frases máximo)",
-  "reason": "por qué elegiste esta canción para este mood (interno, no se muestra al usuario)"
+  "intro": "presentación del DJ para abrir la sesión (1-2 frases)",
+  "reason": "por qué esta canción encaja con el mood (interno)"
 }"""
 
 def build_dj_start_prompt(mood: str, candidates: list) -> str:
-    """
-    Construye el prompt de inicio de sesión.
+    songs_list = "\n".join(_song_line(s) for s in candidates[:20])
+    return f"""El usuario quiere escuchar música con este mood: "{mood}"
 
-    mood:       lo que el usuario escribió ("estoy programando", "quiero algo energético")
-    candidates: lista de canciones disponibles con sus metadatos
-    """
-    songs_list = "\n".join(
-        f'- id:{s["_id"]} | "{s["title"]}" de {s["artist"]} '
-        f'| Género: {s.get("genre","?")} '
-        f'| Energía: {energy_label(get_energy(s.get("genre","")))} '
-        f'| Plays: {s.get("playCount", 0)}'
-        for s in candidates[:20]   # máximo 20 candidatas para no saturar el contexto
-    )
-
-    return f"""El usuario quiere escuchar música con este contexto: "{mood}"
-
-Canciones disponibles en el catálogo:
+Canciones disponibles (con análisis semántico y características de audio):
 {songs_list}
 
-Elige la canción más adecuada para este momento y devuelve el JSON."""
+Elige la canción que MEJOR encaje con "{mood}" considerando vibe, tema emocional
+y metáforas de las letras. Devuelve el JSON."""
 
 
 # ══════════════════════════════════════════════════════
 #  PROMPT 2 — Transición entre canciones
-#  Modelo: llama3.2:3b
-#  Input:  canción anterior + señal de comportamiento + candidatas
-#  Output: JSON con siguiente canción + narración de transición
 # ══════════════════════════════════════════════════════
 
-DJ_NEXT_SYSTEM = """Eres Echofy DJ, el DJ personal del usuario dentro de la app Echofy.
-Tu personalidad: carismático, cercano, musical. Hablas en primera persona como DJ.
-Usas máximo 1-2 frases por transición. Nunca más.
+DJ_NEXT_SYSTEM = """Eres Echofy DJ, el DJ personal del usuario.
+Tu personalidad: carismático, cercano, musical. Hablas en primera persona.
+Usas máximo 1-2 frases. Nunca más.
 
-Señales de comportamiento del usuario:
-- "completed":  escuchó la canción completa → le gustó, mantén o sube energía
-- "skipped_early":  saltó antes del 30% → no le enganchó, cambia de dirección
-- "skipped_mid":  saltó entre 30-70% → le gustó a medias, ajusta suavemente
+Señales de comportamiento:
+- "completed":     le gustó → mantén o evoluciona el mood
+- "skipped_early": no enganchó → cambia de dirección
+- "skipped_mid":   le gustó a medias → ajuste suave
 
-REGLA CRÍTICA: Responde ÚNICAMENTE con un objeto JSON válido.
-Sin texto antes ni después. Sin markdown. Sin explicaciones fuera del JSON.
+INSTRUCCIÓN CRÍTICA: Elige la siguiente canción considerando:
+1. La señal de comportamiento del usuario
+2. El mood de la sesión
+3. El vibe, tema emocional y metáforas de CADA candidata
+4. La coherencia emocional entre la canción anterior y la siguiente
 
-Formato de respuesta obligatorio:
+Responde ÚNICAMENTE con JSON válido:
 {
-  "song_id": "id exacto de la canción elegida",
-  "transition": "narración del DJ para la transición (1-2 frases máximo, en primera persona)",
+  "song_id": "id exacto elegido",
+  "transition": "narración de transición (1-2 frases, primera persona)",
   "energy_delta": "up | same | down",
-  "reason": "justificación interna de la elección (no se muestra al usuario)"
+  "reason": "justificación interna"
 }"""
 
 def build_dj_next_prompt(
-    prev_song: dict,
-    listen_signal: str,       # "completed" | "skipped_early" | "skipped_mid"
-    session_mood: str,        # mood original de la sesión
-    candidates: list,
-    lyrics_snippet: str = "", # primeras líneas de la letra de la canción anterior (opcional)
+    prev_song:     dict,
+    listen_signal: str,
+    session_mood:  str,
+    candidates:    list,
+    lyrics_snippet: str = "",
 ) -> str:
-    """
-    Construye el prompt de transición.
+    af_prev  = prev_song.get("audioFeatures") or {}
+    sem_prev = prev_song.get("semanticAnalysis") or {}
 
-    prev_song:      canción que acaba de terminar/saltarse
-    listen_signal:  cómo interactuó el usuario con la canción
-    session_mood:   contexto original de la sesión (no cambia)
-    candidates:     canciones disponibles para la siguiente
-    lyrics_snippet: fragmento de letra de la canción anterior (si hay)
-    """
-    prev_energy = get_energy(prev_song.get("genre", ""))
-
-    signal_interpretation = {
-        "completed":     "Le gustó — quiere más de esto o algo que suba un escalón",
-        "skipped_early": "No enganchó desde el inicio — necesita un cambio claro",
+    signal_map = {
+        "completed":     "Le encantó — continúa o evoluciona el mood",
+        "skipped_early": "No enganchó — necesita un cambio claro",
         "skipped_mid":   "Empezó bien pero perdió interés — ajuste suave",
-    }.get(listen_signal, "Sin señal clara — mantén la línea")
+    }
 
-    lyrics_context = ""
-    if lyrics_snippet:
-        lyrics_context = f'\nFragmento de letra de la canción anterior:\n"{lyrics_snippet[:200]}"\n'
+    lyrics_ctx = f'\nLetras anteriores: "{lyrics_snippet}"' if lyrics_snippet else ""
 
-    songs_list = "\n".join(
-        f'- id:{s["_id"]} | "{s["title"]}" de {s["artist"]} '
-        f'| Género: {s.get("genre","?")} '
-        f'| Energía: {energy_label(get_energy(s.get("genre","")))} ({get_energy(s.get("genre",""))})'
-        f'| Plays: {s.get("playCount", 0)}'
-        for s in candidates[:20]
-    )
+    songs_list = "\n".join(_song_line(s) for s in candidates[:20])
 
-    return f"""Sesión activa — Contexto del usuario: "{session_mood}"
+    return f"""Sesión DJ — Mood del usuario: "{session_mood}"
 
-Canción anterior:
-- Título: "{prev_song.get('title','?')}" de {prev_song.get('artist','?')}
-- Género: {prev_song.get('genre','?')} | Energía: {energy_label(prev_energy)} ({prev_energy}/9)
-{lyrics_context}
-Señal de comportamiento: {listen_signal} → {signal_interpretation}
+Canción anterior: "{prev_song.get('title','?')}" de {prev_song.get('artist','?')}
+  Vibe: {af_prev.get('vibeTag','?')} | Tema: {sem_prev.get('mainTheme','?')}
+  Emociones: {', '.join(sem_prev.get('emotionalTone',[]))}
+{lyrics_ctx}
 
-Canciones disponibles para la siguiente:
+Señal del usuario: {listen_signal} → {signal_map.get(listen_signal,'sin señal')}
+
+Canciones disponibles:
 {songs_list}
 
-Elige la mejor canción para continuar la sesión y devuelve el JSON."""
+Elige la MEJOR siguiente canción considerando coherencia emocional y el mood de la sesión.
+Devuelve el JSON."""
 
 
 # ══════════════════════════════════════════════════════
-#  PROMPT 3 — Clasificador de mood (modelo ligero)
-#  Modelo: gemma2:2b
-#  Input:  texto libre del usuario
-#  Output: JSON con mood estructurado
+#  PROMPT 3 — Clasificador de mood
 # ══════════════════════════════════════════════════════
 
 DJ_MOOD_SYSTEM = """Eres un clasificador de estados de ánimo musicales.
@@ -186,11 +163,12 @@ Responde ÚNICAMENTE con JSON válido. Sin texto adicional.
 
 Formato obligatorio:
 {
-  "mood": "descripción corta del estado (ej: concentración, energía, relax, melancolía)",
+  "mood": "descripción del estado (ej: melancólico aventurero, concentración intensa)",
   "energy_target": 1-9,
   "genres_hint": ["género1", "género2"],
-  "context": "actividad del usuario si se menciona (ej: programando, ejercicio, estudiar)"
+  "vibe_keywords": ["romántico", "nostálgico", "épico"],
+  "context": "actividad si se menciona"
 }"""
 
 def build_mood_prompt(user_input: str) -> str:
-    return f'El usuario dice: "{user_input}"\nClasifica su estado de ánimo musical.'
+    return f'El usuario dice: "{user_input}"\nClasifica su estado de ánimo musical incluyendo vibes emocionales.'
