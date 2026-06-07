@@ -32,12 +32,15 @@ dj_router = APIRouter(prefix="/api/ai/dj", tags=["DJ"])
 
 # ── Config (heredada del entorno) ──────────────────────
 OLLAMA_URL  = os.getenv("OLLAMA_URL",  "http://ollama:11434")
-MODEL_MAIN  = os.getenv("MODEL_MAIN",  "llama3.2:3b")
+MODEL_MAIN  = os.getenv("MODEL_MAIN",  "gemma2:2b")
 MODEL_LIGHT = os.getenv("MODEL_LIGHT", "gemma2:2b")
 REDIS_URL   = os.getenv("REDIS_AI_URL","redis://redis-ai:6379")
 MONGO_URI   = os.getenv("MONGO_URI")
 JWT_SECRET  = os.getenv("JWT_SECRET")
 SESSION_TTL = 60 * 60 * 4   # sesión DJ dura 4 horas máximo
+
+# ── Palabras clave de mood (para enriquecimiento semántico) ──
+MOOD_KEYWORDS = ["romántico", "nostálgico", "épico", "melancólico", "energético"]
 
 # ── Clientes ───────────────────────────────────────────
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
@@ -128,59 +131,103 @@ async def get_lyrics_snippet(song_id: str) -> str:
 
 
 async def get_candidates(
-    exclude_ids: list,
-    energy_target: int = 5,
-    genres_hint: list = None,
-    limit: int = 25,
+    exclude_ids:    list,
+    energy_target:  int = 5,
+    genres_hint:    list = None,
+    mood_keywords:  list = None,
+    limit:          int = 25,
 ) -> list:
     """
     Obtiene canciones candidatas para el DJ.
-    Prioriza canciones cercanas al energy_target y géneros sugeridos.
-    Excluye las ya reproducidas en la sesión.
+    Ahora incluye audioFeatures y semanticAnalysis para que
+    el modelo pueda elegir semánticamente.
     """
-    # Convertir IDs excluidos a ObjectId
     exc = []
     for eid in exclude_ids:
         try:
             exc.append(ObjectId(str(eid)))
         except Exception:
             pass
-
+ 
     base_filter = {
         "status": {"$regex": r"^\s*complete\s*$", "$options": "i"},
         "_id":    {"$nin": exc},
     }
-
-    # Intentar primero con géneros sugeridos
+ 
+    # Campos a incluir — ahora con audioFeatures
+    projection = {
+        "_id": 1, "title": 1, "artist": 1, "genre": 1,
+        "artwork": 1, "driveId": 1, "playCount": 1, "likeCount": 1,
+        "audioFeatures": 1,   # ← tempoBPM, energyLevel, vibeTag
+    }
+ 
     candidates = []
+ 
+    # Intentar primero con géneros sugeridos
     if genres_hint:
         genre_pats = [re.compile(re.escape(g), re.IGNORECASE) for g in genres_hint]
         cursor = songs_col.find(
-            {**base_filter, "genre": {"$in": genre_pats}},
-            {"_id": 1, "title": 1, "artist": 1, "genre": 1,
-             "artwork": 1, "driveId": 1, "playCount": 1, "likeCount": 1}
+            {**base_filter, "genre": {"$in": genre_pats}}, projection
         ).limit(limit)
         candidates = await cursor.to_list(length=limit)
-
+ 
     # Completar con canciones generales si hay pocas
     if len(candidates) < 10:
-        cursor = songs_col.find(
-            base_filter,
-            {"_id": 1, "title": 1, "artist": 1, "genre": 1,
-             "artwork": 1, "driveId": 1, "playCount": 1, "likeCount": 1}
-        ).limit(limit * 2)
-        extra = await cursor.to_list(length=limit * 2)
-        # Evitar duplicados
+        cursor = songs_col.find(base_filter, projection).limit(limit * 2)
+        extra  = await cursor.to_list(length=limit * 2)
         existing_ids = {str(c["_id"]) for c in candidates}
-        candidates += [s for s in extra if str(s["_id"]) not in existing_ids]
-
-    # Ordenar por proximidad al energy_target
-    def energy_distance(song):
-        e = get_energy(song.get("genre", ""))
-        return abs(e - energy_target)
-
-    candidates.sort(key=energy_distance)
-    return [ser(s) for s in candidates[:limit]]
+        candidates  += [s for s in extra if str(s["_id"]) not in existing_ids]
+ 
+    # Para cada candidata, enriquecer con semanticAnalysis desde lyrics
+    candidate_ids = [str(c["_id"]) for c in candidates]
+    lyrics_cursor = lyrics_col.find(
+        {"songId": {"$in": candidate_ids}},
+        {"songId": 1, "semanticAnalysis": 1}
+    )
+    lyrics_docs = await lyrics_cursor.to_list(length=len(candidates))
+    lyrics_map  = {doc["songId"]: doc.get("semanticAnalysis") for doc in lyrics_docs}
+ 
+    # Añadir semanticAnalysis a cada candidata
+    for c in candidates:
+        c["semanticAnalysis"] = lyrics_map.get(str(c["_id"]))
+ 
+    # Ordenar: primero las que tienen audioFeatures y semanticAnalysis
+    # luego por proximidad al energy_target
+    def sort_key(song):
+        has_features  = 1 if song.get("audioFeatures") else 0
+        has_semantic  = 1 if song.get("semanticAnalysis") else 0
+        energy_raw    = song.get("audioFeatures", {}).get("energyLevel", "") if song.get("audioFeatures") else ""
+        energy_map    = {"low": 2, "medium": 5, "high": 8}
+        energy_num    = energy_map.get(energy_raw, get_energy(song.get("genre", "")))
+        energy_dist   = abs(energy_num - energy_target)
+        # Priorizar: tiene semantic > tiene features > energía cercana
+        return (-has_semantic, -has_features, energy_dist)
+ 
+    candidates.sort(key=sort_key)
+    return [ser(c) for c in candidates[:limit]]
+ 
+ 
+async def find_song_by_name(query: str) -> dict | None:
+    """
+    Busca una canción exacta por nombre o artista.
+    Usado cuando el usuario pide una canción específica al DJ.
+    """
+    pat = re.compile(re.escape(query), re.IGNORECASE)
+    doc = await songs_col.find_one(
+        {
+            "status": {"$regex": r"^\s*complete\s*$", "$options": "i"},
+            "$or": [
+                {"title":  pat},
+                {"artist": pat},
+                {"titleNorm": re.compile(re.sub(r"[^a-z0-9]", "", query.lower()))},
+            ]
+        },
+        {
+            "_id": 1, "title": 1, "artist": 1, "genre": 1,
+            "artwork": 1, "driveId": 1, "audioFeatures": 1,
+        }
+    )
+    return ser(doc) if doc else None
 
 
 # ══════════════════════════════════════════════════════
@@ -194,6 +241,9 @@ class DJNextRequest(BaseModel):
     current_song_id: str            # ID de la canción que acaba de terminar/saltarse
     listen_signal:   str            # "completed" | "skipped_early" | "skipped_mid"
     progress_pct:    Optional[float] = 100.0  # % de la canción escuchada (0-100)
+
+class DJPlaySongRequest(BaseModel):
+    query: str 
 
 
 # ══════════════════════════════════════════════════════
@@ -397,6 +447,77 @@ async def dj_next(req: DJNextRequest, authorization: str = Header(...)):
         },
     }
 
+@dj_router.post("/play-song")
+async def dj_play_song(req: DJPlaySongRequest, authorization: str = Header(...)):
+    """
+    El usuario pide una canción específica al DJ.
+    Busca por nombre/artista y la devuelve inmediatamente
+    sin consultar al modelo.
+    
+    Ejemplo: { "query": "505 arctic monkeys" }
+    """
+    payload = decode_token(authorization)
+    user_id = payload.get("id")
+ 
+    # Buscar en Mongo por título o artista
+    query   = req.query.strip()
+    words   = query.split()
+    pat     = re.compile(re.escape(query), re.IGNORECASE)
+    any_pat = re.compile("|".join(re.escape(w) for w in words if len(w) > 2), re.IGNORECASE)
+ 
+    # Intentar match exacto primero
+    song = await songs_col.find_one(
+        {
+            "status": {"$regex": r"^\s*complete\s*$", "$options": "i"},
+            "$or": [
+                {"title":      pat},
+                {"artist":     pat},
+                {"titleNorm":  re.compile(re.sub(r"[^a-z0-9]", "", query.lower()))},
+                {"artistNorm": re.compile(re.sub(r"[^a-z0-9]", "", query.lower()))},
+            ]
+        },
+        {"_id": 1, "title": 1, "artist": 1, "genre": 1, "artwork": 1, "driveId": 1, "audioFeatures": 1}
+    )
+ 
+    # Si no hay match exacto, buscar por palabras individuales
+    if not song and len(words) > 1:
+        song = await songs_col.find_one(
+            {
+                "status": {"$regex": r"^\s*complete\s*$", "$options": "i"},
+                "$or": [
+                    {"title":  any_pat},
+                    {"artist": any_pat},
+                ]
+            },
+            {"_id": 1, "title": 1, "artist": 1, "genre": 1, "artwork": 1, "driveId": 1, "audioFeatures": 1}
+        )
+ 
+    if not song:
+        raise HTTPException(
+            status_code=404,
+            detail=f'No encontré "{query}" en la biblioteca. ¿Quieres que la busque en YouTube?'
+        )
+ 
+    song = ser(song)
+ 
+    # Si hay sesión DJ activa, añadir la canción al historial
+    session = await get_session(user_id)
+    if session:
+        session["played_ids"].append(str(song["_id"]))
+        session["current_song"] = song
+        session["history"].append({
+            "song_id": str(song["_id"]),
+            "signal":  "manual_request",
+            "title":   song["title"],
+        })
+        await save_session(user_id, session)
+ 
+    return {
+        "song":       song,
+        "transition": f'Claro, ponemos "{song["title"]}" de {song["artist"]} ahora mismo. 🎵',
+        "found":      True,
+    }
+ 
 
 @dj_router.get("/session")
 async def dj_session(authorization: str = Header(...)):
