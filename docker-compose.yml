@@ -222,5 +222,20 @@ services:
       - redis
     restart: unless-stopped
 
+  artists:
+    build: ./services/artists
+    container_name: echofy-artists
+    ports:
+      - "8089:3000"
+    volumes:
+      - ./services/artists:/app
+      - /app/node_modules
+    env_file:
+      - ./services/artists/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
 volumes:
   ollama_models:
+

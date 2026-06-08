@@ -1,7 +1,7 @@
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import Player from './Player';
 import { useState, useEffect, useRef } from 'react';
-import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight, BarChart2, X, Crown } from 'lucide-react';
+import { Search, LogOut, Disc3, Home, Heart, ListMusic, Clock, ChevronLeft, ChevronRight, BarChart2, X, Crown, Mic2 } from 'lucide-react';
 import AdBanner from './AdBanner';
 import { usePremium } from '../hooks/usePremium';
 
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/recent',   icon: Clock,     label: 'Recientes'    },
   { to: '/favorites',icon: Heart,     label: 'Favoritos'    },
   { to: '/playlists',icon: ListMusic, label: 'Playlists'    },
+  { to: '/artists',  icon: Mic2,      label: 'Artistas'     },
   { to: '/stats',    icon: BarChart2, label: 'Tu Ritmo'     },
   { to: '/subscriptions', icon: Crown, label: 'Suscripciones' },
 ];
