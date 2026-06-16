@@ -10,7 +10,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
 
-  # ── REDIS (compartido) ────────────────────────────────
+  # ── REDIS ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: echofy-redis
@@ -157,13 +157,9 @@ services:
     volumes:
       - ollama_models:/root/.ollama
     environment:
-      # Fix para GPU discovery timeout en GPUs Blackwell (RTX 5060 Ti)
       - OLLAMA_GPU_DISCOVERY_TIMEOUT=120
-      # Mantener modelos en VRAM entre peticiones (evita recargas)
       - OLLAMA_KEEP_ALIVE=24h
-      # Aumentar timeout de carga del servidor llama
       - OLLAMA_LOAD_TIMEOUT=600
-      # Número de capas en GPU — forzar todas a GPU
       - OLLAMA_NUM_GPU=999
     restart: unless-stopped
     deploy:
@@ -174,7 +170,6 @@ services:
               count: all
               capabilities: [gpu]
 
-  # ── OLLAMA INITIALIZER (descargar modelos automáticamente) ────────
   ollama-init:
     image: curlimages/curl:latest
     container_name: echofy-ollama-init
@@ -188,11 +183,11 @@ services:
         until curl -sf http://echofy-ollama:11434/api/tags > /dev/null 2>&1; do
           sleep 3
         done
-        echo '✅ Ollama listo. Descargando gemma2:2b...'
+        echo '✅ Ollama listo. Descargando gemma2:9b...'
         curl -sf --max-time 1800 \
           -X POST http://echofy-ollama:11434/api/pull \
           -H 'Content-Type: application/json' \
-          -d '{"name":"gemma2:2b","stream":false}'
+          -d '{"name":"gemma2:9b","stream":false}'
         echo '📥 Descargando nomic-embed-text...'
         curl -sf --max-time 600 \
           -X POST http://echofy-ollama:11434/api/pull \

@@ -13,6 +13,11 @@ export interface DJSong {
   driveId?: string;
 }
 
+export interface DJChatMessage {
+  role:    'user' | 'assistant';
+  content: string;
+}
+
 export interface DJState {
   active:      boolean;
   loading:     boolean;
@@ -20,15 +25,25 @@ export interface DJState {
   mood:        string;
   energyLevel: number;
   songsPlayed: number;
-  queue:       DJSong[];   // cola local de canciones pre-cargadas
+  queue:       DJSong[];        // cola local de canciones pre-cargadas
+  messages:    DJChatMessage[]; // historial de chat con el DJ
+  chatLoading: boolean;         // loading específico del chat (no bloquea reproducción)
 }
 
 export interface UseDJSession {
-  djState:  DJState;
-  startDJ:  (mood: string) => Promise<DJSong | null>;
-  nextDJ:   (currentSongId: string, signal: ListenSignal) => Promise<DJSong | null>;
-  endDJ:    () => Promise<void>;
-  resetDJ:  () => void;
+  djState:      DJState;
+  startDJ:      (mood: string) => Promise<DJSong | null>;
+  nextDJ:       (currentSongId: string, signal: ListenSignal) => Promise<DJSong | null>;
+  endDJ:        () => Promise<void>;
+  resetDJ:      () => void;
+  sendDJMessage: (message: string) => Promise<DJMessageResult | null>;
+}
+
+export interface DJMessageResult {
+  action:         'CHAT_ONLY' | 'PLAY_NOW' | 'ADD_QUEUE';
+  dj_speech:      string;
+  song:           DJSong | null;
+  queue_addition: DJSong[];
 }
 
 const INITIAL_STATE: DJState = {
@@ -39,6 +54,8 @@ const INITIAL_STATE: DJState = {
   energyLevel: 5,
   songsPlayed: 0,
   queue:       [],
+  messages:    [],
+  chatLoading: false,
 };
 
 const REFILL_THRESHOLD = 3;   // pedir más canciones cuando queden ≤ 3 en cola
@@ -112,7 +129,7 @@ export const useDJSession = (): UseDJSession => {
     if (pendingRef.current) return null;
     pendingRef.current = true;
 
-    patch({ loading: true, narration: '', mood: '', queue: [] });
+    patch({ loading: true, narration: '', mood: '', queue: [], messages: [] });
 
     try {
       const res = await fetch(`${API.ai}/dj/start`, {
@@ -223,6 +240,81 @@ export const useDJSession = (): UseDJSession => {
   }, [djState, patch, refillIfNeeded]);
 
 
+  // ── Chat interactivo con el DJ ─────────────────────
+  const sendDJMessage = useCallback(async (
+    message: string,
+  ): Promise<DJMessageResult | null> => {
+    if (!djState.active) return null;
+    const trimmed = message.trim();
+    if (!trimmed) return null;
+
+    // Optimistic: añadir mensaje del usuario al historial local
+    setDJState(prev => ({
+      ...prev,
+      chatLoading: true,
+      messages: [...prev.messages, { role: 'user', content: trimmed }],
+    }));
+
+    try {
+      const res = await fetch(`${API.ai}/dj/message`, {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({ message: trimmed }),
+      });
+
+      if (!res.ok) throw new Error(`DJ message failed: ${res.status}`);
+
+      const data = await res.json();
+      const result: DJMessageResult = {
+        action:         data.action ?? 'CHAT_ONLY',
+        dj_speech:      data.dj_speech ?? '',
+        song:           data.song ?? null,
+        queue_addition: data.queue_addition ?? [],
+      };
+
+      setDJState(prev => {
+        let queue = prev.queue;
+        let songsPlayed = prev.songsPlayed;
+        let narration = prev.narration;
+
+        if (result.action === 'PLAY_NOW' && result.song) {
+          // Cambio inmediato de canción — el componente padre debe
+          // reproducirla (ver retorno de esta función)
+          songsPlayed = prev.songsPlayed + 1;
+          narration = result.dj_speech;
+        } else if (result.action === 'ADD_QUEUE' && result.queue_addition.length) {
+          queue = [...prev.queue, ...result.queue_addition];
+        }
+
+        return {
+          ...prev,
+          chatLoading: false,
+          queue,
+          songsPlayed,
+          narration,
+          energyLevel: data.session?.energy_target ?? prev.energyLevel,
+          mood:        data.session?.mood ?? prev.mood,
+          messages: [...prev.messages, { role: 'assistant', content: result.dj_speech }],
+        };
+      });
+
+      return result;
+
+    } catch (err) {
+      console.error('[DJ] sendDJMessage error:', err);
+      setDJState(prev => ({
+        ...prev,
+        chatLoading: false,
+        messages: [...prev.messages, {
+          role: 'assistant',
+          content: 'Uy, se me cortó la señal un segundo. ¿Puedes repetirlo?',
+        }],
+      }));
+      return null;
+    }
+  }, [djState.active]);
+
+
   // ── Terminar sesión ────────────────────────────────
   const endDJ = useCallback(async () => {
     try {
@@ -248,7 +340,7 @@ export const useDJSession = (): UseDJSession => {
   }, []);
 
 
-  return { djState, startDJ, nextDJ, endDJ, resetDJ };
+  return { djState, startDJ, nextDJ, endDJ, resetDJ, sendDJMessage };
 };
 
 

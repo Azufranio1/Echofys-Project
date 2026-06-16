@@ -1,21 +1,3 @@
-"""
-Echofy AI Service — main.py
-────────────────────────────
-Puerto interno: 3000  →  externo: 8090
-
-Modelos:
-  llama3.2:3b  → chat premium con memoria y skills
-  gemma2:2b    → clasificador rápido, búsqueda, recomendaciones free
-
-Flujo general:
-  1. Frontend manda mensaje + JWT
-  2. Validamos token
-  3. Modelo ligero clasifica la intención
-  4. Se ejecuta la skill correspondiente
-  5. Modelo principal genera respuesta en lenguaje natural
-  6. Guardamos en historial Redis y respondemos
-"""
-
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -63,19 +45,18 @@ app.include_router(dj_router)
 # ── Configuración ──────────────────────────────────────
 OLLAMA_URL  = os.getenv("OLLAMA_URL",  "http://ollama:11434")
 # MODEL_MAIN  = os.getenv("MODEL_MAIN",  "llama3.2:3b")
-MODEL_MAIN  = os.getenv("MODEL_MAIN",  "gemma2:2b")
-MODEL_LIGHT = os.getenv("MODEL_LIGHT", "gemma2:2b")
+MODEL_MAIN  = os.getenv("MODEL_MAIN",  "gemma2:9b")
+MODEL_LIGHT = os.getenv("MODEL_LIGHT", "gemma2:9b")
 REDIS_URL   = os.getenv("REDIS_AI_URL","redis://redis-ai:6379")
 MONGO_URI   = os.getenv("MONGO_URI")
 JWT_SECRET  = os.getenv("JWT_SECRET")
 CONV_TTL    = int(os.getenv("CONVERSATION_TTL",     "86400"))
 MAX_HISTORY = int(os.getenv("MAX_HISTORY_MESSAGES",  "20"))
 
-# ── Clientes ───────────────────────────────────────────
 redis_client = aioredis.from_url(REDIS_URL, decode_responses=True)
 mongo_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 db           = mongo_client["Echofy-Music-Data"]
-songs_col    = db["Music"]   # ← ajusta si tu colección tiene otro nombre
+songs_col    = db["Music"]
 
 
 # ══════════════════════════════════════════════════════
@@ -156,7 +137,6 @@ async def classify_intent(message: str) -> dict:
             INTENT_SYSTEM,
             as_json=True,
         )
-        # Limpiar posible markdown que el modelo añada
         raw = raw.strip().strip("```json").strip("```").strip()
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         if match:
@@ -201,14 +181,14 @@ class SemanticSearchRequest(BaseModel):
 @app.on_event("startup")
 async def warmup_models():
     """
-    Pre-carga gemma2:2b en VRAM al arrancar.
+    Pre-carga gemma2:9b en VRAM al arrancar.
     Reintenta hasta 5 veces con espera entre intentos
     para dar tiempo a que Ollama cargue el modelo.
     """
     import asyncio
     await asyncio.sleep(10)  # esperar arranque completo de uvicorn
 
-    print("🔥 Calentando gemma2:2b en Ollama...")
+    print("🔥 Calentando gemma2:9b en Ollama...")
 
     for attempt in range(1, 6):
         try:
@@ -260,7 +240,6 @@ async def search_semantic(req: SemanticSearchRequest, authorization: str = Heade
         min_similarity = 0.3,
     )
 
-    # Explicación del modelo (opcional, tarda ~2s extra)
     explanation = ""
     if req.explain and results:
         explanation = await explain_results(
@@ -285,8 +264,6 @@ async def health():
         "models": {"main": MODEL_MAIN, "light": MODEL_LIGHT},
     }
 
-
-# ── CHAT PREMIUM (llama3.2:3b) ─────────────────────────
 @app.post("/api/ai/chat")
 async def chat(req: ChatRequest, authorization: str = Header(...)):
     """
@@ -304,16 +281,14 @@ async def chat(req: ChatRequest, authorization: str = Header(...)):
     recent  = await get_recent(user_id, limit=8)
     recent_str = ", ".join(s.get("title", "") for s in recent[:5]) or "ninguna aún"
 
-    # 1. Clasificar intención
     intent_data = await classify_intent(req.message)
     intent = intent_data.get("intent", "chat")
     query  = intent_data.get("query")  or req.message
     genre  = intent_data.get("genre")  or "Unknown"
     url    = intent_data.get("url")
 
-    # 2. Ejecutar skill y construir contexto para el modelo principal
     skill_context  = ""
-    extra_data     = {}   # datos estructurados para el frontend
+    extra_data     = {}
 
     if intent == "recommend":
         songs = await recommend_from_history(songs_col, recent, limit=8)
@@ -380,7 +355,6 @@ async def chat(req: ChatRequest, authorization: str = Header(...)):
         )
         extra_data = {"playlist": pl}
 
-    # 3. Construir prompt con historial
     history_text = "".join(
         f"{'Usuario' if m['role'] == 'user' else 'Echofy AI'}: {m['content']}\n"
         for m in history[-MAX_HISTORY:]
@@ -396,7 +370,6 @@ Si mencionas canciones, indica siempre título y artista."""
     prompt = f"{history_text}Usuario: {req.message}\nEchofy AI:"
     response = await call_ollama(MODEL_MAIN, prompt, system)
 
-    # 4. Guardar en historial
     history.append({"role": "user",      "content": req.message})
     history.append({"role": "assistant", "content": response})
     await save_history(user_id, history)
@@ -405,11 +378,9 @@ Si mencionas canciones, indica siempre título y artista."""
         "response": response,
         "intent":   intent,
         "model":    MODEL_MAIN,
-        **extra_data,       # songs / youtube / playlist / job según la acción
+        **extra_data,
     }
 
-
-# ── RECOMENDACIONES (gemma2:2b, free + premium) ────────
 @app.post("/api/ai/recommend")
 async def recommend(req: RecommendRequest, authorization: str = Header(...)):
     """
@@ -429,8 +400,6 @@ async def recommend(req: RecommendRequest, authorization: str = Header(...)):
 
     return {"songs": songs, "count": len(songs)}
 
-
-# ── BÚSQUEDA INTELIGENTE (gemma2:2b, free + premium) ───
 @app.post("/api/ai/search")
 async def search(req: SearchRequest, authorization: str = Header(...)):
     """
@@ -439,7 +408,7 @@ async def search(req: SearchRequest, authorization: str = Header(...)):
       2. iTunes (metadata oficial si hay pocos en BD)
       3. YouTube (si el usuario lo pide explícitamente)
     """
-    decode_token(authorization)   # solo validar, no necesitamos user_id
+    decode_token(authorization)
 
     # Capa 1: Mongo
     pat    = re.compile(re.escape(req.query), re.IGNORECASE)
@@ -452,12 +421,10 @@ async def search(req: SearchRequest, authorization: str = Header(...)):
     ).limit(req.limit)
     db_results = [serialize_song(s) for s in await cursor.to_list(length=req.limit)]
 
-    # Capa 2: iTunes si hay pocos resultados en BD
     itunes_results = []
     if len(db_results) < 3:
         itunes_results = await search_itunes(req.query, limit=5)
 
-    # Capa 3: YouTube solo si el usuario lo pide explícitamente
     yt_results = []
     yt_keywords = ["youtube", "youtu", "video", "escuchar en", "link"]
     if any(kw in req.query.lower() for kw in yt_keywords):
@@ -470,8 +437,6 @@ async def search(req: SearchRequest, authorization: str = Header(...)):
         "total":     len(db_results) + len(itunes_results),
     }
 
-
-# ── INGESTA MANUAL ──────────────────────────────────────
 @app.post("/api/ai/ingest")
 async def ingest(req: IngestRequest, authorization: str = Header(...)):
     """Dispara la ingesta de una URL de YouTube directamente."""
@@ -479,15 +444,11 @@ async def ingest(req: IngestRequest, authorization: str = Header(...)):
     result = await ingest_url(req.url, req.genre)
     return result
 
-
-# ── STATUS DE INGESTA ───────────────────────────────────
 @app.get("/api/ai/ingest/status/{job_id}")
 async def ingest_status_endpoint(job_id: str, authorization: str = Header(...)):
     decode_token(authorization)
     return await ingest_status(job_id)
 
-
-# ── GUARDAR CANCIÓN REPRODUCIDA EN CONTEXTO ─────────────
 @app.post("/api/ai/context/recent")
 async def save_recent(payload: RecentSongPayload, authorization: str = Header(...)):
     """
@@ -501,7 +462,6 @@ async def save_recent(payload: RecentSongPayload, authorization: str = Header(..
     raw    = await redis_client.get(key)
     recent = json.loads(raw) if raw else []
 
-    # Deduplicar y añadir al principio
     song_id = str(payload.song.get("_id", ""))
     recent  = [s for s in recent if str(s.get("_id", "")) != song_id]
     recent.insert(0, payload.song)
@@ -510,8 +470,6 @@ async def save_recent(payload: RecentSongPayload, authorization: str = Header(..
     await redis_client.set(key, json.dumps(recent), ex=CONV_TTL)
     return {"ok": True}
 
-
-# ── BORRAR HISTORIAL DE CONVERSACIÓN ────────────────────
 @app.delete("/api/ai/chat/history")
 async def clear_history(authorization: str = Header(...)):
     """Borra el historial de chat del usuario (no el contexto musical)."""

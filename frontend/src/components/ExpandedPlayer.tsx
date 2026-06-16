@@ -5,6 +5,7 @@ import { ChevronDown, Music2, Play, Pause, SkipBack, SkipForward,
 import { usePlayerStore } from '../store/usePlayerStore';
 import HeartButton from './HeartButton';
 import type { QueueMeta } from '../hooks/useQueue';
+import type { DJChatMessage, DJMessageResult } from '../hooks/useDJSession';
 import { API, authHeaders } from '../lib/api';
 import { usePremium } from '../hooks/usePremium';
 import { useNavigate } from 'react-router-dom';
@@ -32,6 +33,9 @@ interface Props {
   djLoading: boolean;
   onDJStart: (mood: string) => void;
   onDJEnd: () => void;
+  djMessages?: DJChatMessage[];
+  djChatLoading?: boolean;
+  onDJMessage?: (message: string) => Promise<DJMessageResult | null>;
 }
 
 interface LyricLine { time: number; text: string; }
@@ -205,11 +209,22 @@ interface DJTabProps {
   onDJStart:   (mood: string) => void;
   onDJEnd:     () => void;
   currentSong: any;
+  djMessages?:    DJChatMessage[];
+  djChatLoading?: boolean;
+  onDJMessage?:   (message: string) => Promise<DJMessageResult | null>;
+  onSelectSong:   (song: any) => void;
 }
 
-const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, currentSong }: DJTabProps) => {
+const DJTab = ({
+  djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, currentSong,
+  djMessages, djChatLoading, onDJMessage, onSelectSong,
+}: DJTabProps) => {
+  const messages    = djMessages ?? [];
+  const chatLoading = djChatLoading ?? false;
   const [moodInput, setMoodInput] = useState('');
+  const [chatInput, setChatInput] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const handleStart = () => {
     const mood = moodInput.trim();
@@ -217,6 +232,20 @@ const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, cur
     onDJStart(mood);
     setMoodInput('');
   };
+
+  const handleSendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatLoading || !onDJMessage) return;
+    setChatInput('');
+    // onDJMessage (Player.tsx) ya se encarga de reproducir la canción
+    // si la acción es PLAY_NOW, sin terminar la sesión DJ.
+    await onDJMessage(msg);
+  };
+
+  useEffect(() => {
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, chatLoading]);
 
   return (
     <>
@@ -266,6 +295,16 @@ const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, cur
         .dj-empty-icon { width:56px; height:56px; border-radius:16px; background:rgba(139,92,246,0.08); border:1px solid rgba(139,92,246,0.15); display:flex; align-items:center; justify-content:center; }
         .dj-empty-title { font-size:14px; font-weight:700; color:rgba(255,255,255,0.5); margin:0; font-family:'Sora',sans-serif; }
         .dj-empty-sub   { font-size:12px; color:rgba(255,255,255,0.25); margin:0; font-family:'Sora',sans-serif; max-width:220px; line-height:1.5; }
+        .dj-chat-scroll { flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding-right:4px; }
+        .dj-chat-scroll::-webkit-scrollbar { width:3px; }
+        .dj-chat-scroll::-webkit-scrollbar-thumb { background:rgba(139,92,246,0.3); border-radius:2px; }
+        .dj-msg-row { display:flex; gap:10px; align-items:flex-start; }
+        .dj-msg-row.user { flex-direction:row-reverse; }
+        .dj-msg-bubble { max-width:80%; padding:10px 13px; border-radius:12px; font-size:12.5px; font-weight:500; line-height:1.5; font-family:'Sora',sans-serif; }
+        .dj-msg-row.assistant .dj-msg-bubble { background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:rgba(255,255,255,0.85); border-radius:0 12px 12px 12px; }
+        .dj-msg-row.user .dj-msg-bubble { background:linear-gradient(135deg,rgba(155,114,245,0.25),rgba(109,40,217,0.22)); border:1px solid rgba(139,92,246,0.35); color:#ede9fe; border-radius:12px 0 12px 12px; }
+        .dj-msg-avatar { width:28px; height:28px; border-radius:50%; flex-shrink:0; background:linear-gradient(135deg,#9b72f5,#6d28d9); display:flex; align-items:center; justify-content:center; box-shadow:0 0 10px rgba(139,92,246,0.35); }
+        .dj-chat-input-row { display:flex; gap:8px; flex-shrink:0; }
       `}</style>
 
       <div className="dj-wrap">
@@ -309,7 +348,7 @@ const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, cur
               </div>
             )}
 
-            {djNarration && !djLoading && (
+            {djNarration && !djLoading && messages.length === 0 && (
               <div className="dj-narration-wrap">
                 <div className="dj-avatar">
                   <Disc3 size={16} color="white" style={{animation:'spin-l 3s linear infinite'}}/>
@@ -317,6 +356,31 @@ const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, cur
                 <div className="dj-bubble">{djNarration}</div>
               </div>
             )}
+
+            <div className="dj-chat-scroll" ref={chatScrollRef}>
+              {messages.map((m, i) => (
+                <div key={i} className={`dj-msg-row ${m.role}`}>
+                  {m.role === 'assistant' && (
+                    <div className="dj-msg-avatar">
+                      <Disc3 size={14} color="white"/>
+                    </div>
+                  )}
+                  <div className="dj-msg-bubble">{m.content}</div>
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="dj-msg-row assistant">
+                  <div className="dj-msg-avatar">
+                    <Disc3 size={14} color="white" style={{animation:'spin-l 3s linear infinite'}}/>
+                  </div>
+                  <div className="dj-msg-bubble">
+                    <div className="dj-loading-dots">
+                      <div className="dj-dot"/><div className="dj-dot"/><div className="dj-dot"/>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -356,23 +420,23 @@ const DJTab = ({ djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd, cur
           </>
         )}
 
-        {djMode && !djLoading && (
+        {djMode && (
           <div className="dj-input-section">
-            <div className="dj-input-label">Cambiar el ambiente</div>
-            <div className="dj-input-row">
+            <div className="dj-chat-input-row">
               <input
                 className="dj-input"
-                placeholder="Dime qué quieres ahora..."
-                value={moodInput}
-                onChange={e => setMoodInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && moodInput.trim()) { onDJStart(moodInput.trim()); setMoodInput(''); }}}
+                placeholder="Pídeme una canción, cuéntame tu mood, o solo charla..."
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSendChat()}
+                disabled={chatLoading}
               />
               <button
                 className="dj-send-btn"
-                onClick={() => { if (moodInput.trim()) { onDJStart(moodInput.trim()); setMoodInput(''); }}}
-                disabled={!moodInput.trim()}
+                onClick={handleSendChat}
+                disabled={chatLoading || !chatInput.trim()}
               >
-                <Send size={16}/>
+                {chatLoading ? <Loader2 size={16} style={{animation:'spin-l 0.8s linear infinite'}}/> : <Send size={16}/>}
               </button>
             </div>
           </div>
@@ -389,6 +453,7 @@ const ExpandedPlayer = ({
   currentTime, duration, isMuted, volume,
   onSeek, onVolumeChange, onToggleMute, onSkipBack, onSkipForward,
   djMode, djNarration, djMood, djLoading, onDJStart, onDJEnd,
+  djMessages, djChatLoading, onDJMessage,
 }: Props) => {
   const { isPlaying, togglePlay } = usePlayerStore();
   const { isPremium } = usePremium();
@@ -697,6 +762,10 @@ const ExpandedPlayer = ({
                   onDJStart={onDJStart}
                   onDJEnd={onDJEnd}
                   currentSong={song}
+                  djMessages={djMessages}
+                  djChatLoading={djChatLoading}
+                  onDJMessage={onDJMessage}
+                  onSelectSong={onSelectSong}
                 />
               ) : (
                 <PremiumOverlay feature="El Modo DJ"/>
