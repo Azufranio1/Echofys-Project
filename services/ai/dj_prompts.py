@@ -1,12 +1,3 @@
-"""
-Echofy DJ — Prompts controlados (v2)
-──────────────────────────────────────
-Ahora incluye audioFeatures (vibeTag, energyLevel, tempoBPM)
-y semanticAnalysis (mainTheme, emotionalTone) en los prompts
-para que el modelo pueda elegir semánticamente.
-"""
-
-# ── Mapa de energía por género (fallback sin audioFeatures) ──
 GENRE_ENERGY = {
     "metal":       9, "hard rock":  8, "punk":       8,
     "electronic":  7, "dance":      7, "reggaeton":  7,
@@ -36,14 +27,12 @@ def _song_line(s: dict) -> str:
     af  = s.get("audioFeatures") or {}
     sem = s.get("semanticAnalysis") or {}
 
-    # Energía: usar audioFeatures si existe, si no inferir del género
     energy_raw = af.get("energyLevel", "")
     energy_map = {"low": 2, "medium": 5, "high": 8}
     energy_num = energy_map.get(energy_raw, get_energy(s.get("genre", "")))
     vibe       = af.get("vibeTag", "")
     bpm        = af.get("tempoBPM", "")
 
-    # Análisis semántico
     theme      = sem.get("mainTheme", "")
     emotions   = ", ".join(sem.get("emotionalTone", []))
     metaphors  = "; ".join(sem.get("keyMetaphors", []))
@@ -172,3 +161,50 @@ Formato obligatorio:
 
 def build_mood_prompt(user_input: str) -> str:
     return f'El usuario dice: "{user_input}"\nClasifica su estado de ánimo musical incluyendo vibes emocionales.'
+
+DJ_ORCHESTRATOR_SYSTEM = """Eres Echofy DJ, un DJ personal de radio en vivo y experto en curación musical. 
+Tu personalidad: carismático, elocuente, melómano apasionado y muy cercano. Hablas en primera persona.
+Tu objetivo es mantener una conversación fluida con el usuario. Él puede pedirte música, hacerte preguntas sobre la canción actual, o simplemente charlar de su día.
+INSTRUCCIONES DE ACCIÓN:
+Debes evaluar el mensaje del usuario y decidir qué acción tomar mediante el parámetro "action":
+1. "CHAT_ONLY": El usuario solo quiere conversar o hizo una pregunta. NO cambies la música ni la cola.
+2. "PLAY_NOW": El usuario pidió un cambio drástico, una canción específica o un mood nuevo. Elige la mejor opción de los candidatos.
+3. "ADD_QUEUE": El usuario quiere sugerencias para más adelante.
+INSTRUCCIONES DE NARRACIÓN (¡Adiós al minimalismo!):
+- No te limites a 1 o 2 frases genéricas. Expláyate. Conecta con el usuario.
+- Si recomiendas o cambias una canción, audita su semanticAnalysis. Utiliza obligatoriamente las METÁFORAS del catálogo ("keyMetaphors") y el TEMA ("mainTheme") para justificar tu elección como un dato curioso o análisis artístico de la obra.
+- Explora el historial del usuario (recomendaciones pasadas, canciones en cola) y menciona algo relevante sobre cómo ese contexto influye en la recomendación actual.
+Devuelve SIEMPRE y ÚNICAMENTE un JSON válido con esta estructura:
+{
+  "action": "PLAY_NOW | CHAT_ONLY | ADD_QUEUE",
+  "song_id": "ID_DE_LA_CANCIÓN_ELEGIDA" (o null si action es CHAT_ONLY),
+  "dj_speech": "Tu locución hablada. Debe ser interactiva, carismática y rica en detalles líricos/musicales de la canción.",
+  "energy_delta": "up | same | down",
+  "reasoning_interno": "Tu análisis técnico de por qué tomaste esta decisión."
+}"""
+
+def build_dj_agent_prompt(user_input: str, current_song: dict, candidates: list, chat_history: list) -> str:
+    current_ctx = "NINGUNA (Silencio)"
+    if current_song:
+        af = current_song.get("audioFeatures") or {}
+        sem = current_song.get("semanticAnalysis") or {}
+        current_ctx = (
+            f'"{current_song["title"]}" de {current_song["artist"]} '
+            f'| Tema: {sem.get("mainTheme", "")} | Metáforas: {"; ".join(sem.get("keyMetaphors", []))}'
+        )
+    songs_list = "\n".join(_song_line(s) for s in candidates[:15]) if candidates else "(sin candidatas — solo CHAT_ONLY es posible)"
+    history_str = "\n".join(f"{msg['role']}: {msg['content']}" for msg in chat_history[-4:]) or "(sin mensajes previos)"
+    return f"""
+    [HISTORIAL DE CONVERSACIÓN RECIENTE]
+    {history_str}
+    [ESTADO REPRODUCTOR ACTUAL]
+    Sonando ahora: {current_ctx}
+    [CANDIDATOS DISPONIBLES EN CATÁLOGO (RAG)]
+    {songs_list}
+    [MENSAJE ACTUAL DEL USUARIO]
+    "{user_input}"
+    Analiza el mensaje. Si solo te está preguntando algo sobre la canción que está sonando o charlando, responde con 'CHAT_ONLY' y usa los datos de la canción actual para deslumbrarlo con tu conocimiento lírico.
+    Si pide un cambio de sentimiento/mood/género, o notas que cambió de mood, los candidatos ya fueron filtrados según ese nuevo mood — elige el mejor y responde con 'PLAY_NOW'.
+    Si solo quiere sugerencias para más adelante sin interrumpir lo que suena, responde con 'ADD_QUEUE'.
+    Genera el JSON:
+    """

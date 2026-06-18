@@ -1,24 +1,9 @@
-"""
-Echofy — Semantic Search
-─────────────────────────
-Búsqueda semántica de canciones usando embeddings de letras.
-
-Flujo:
-  1. Vectorizar la consulta del usuario con nomic-embed-text
-  2. Calcular cosine similarity contra lyrics_embedding en Mongo
-  3. Filtrar solo canciones con embeddings disponibles
-  4. gemma2:2b explica por qué recomienda las top N
-"""
-
 import httpx
 import math
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-
 EMBED_MODEL = "nomic-embed-text"
 
-
-# ── Vectorizar texto con nomic-embed-text ─────────────
 async def get_embedding(text: str, ollama_url: str) -> list[float] | None:
     """
     Genera un embedding de 768 dimensiones para el texto dado.
@@ -36,8 +21,6 @@ async def get_embedding(text: str, ollama_url: str) -> list[float] | None:
         print(f"[semantic] Error generando embedding: {e}")
         return None
 
-
-# ── Cosine similarity ─────────────────────────────────
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Similitud coseno entre dos vectores."""
     dot   = sum(x * y for x, y in zip(a, b))
@@ -47,8 +30,6 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
         return 0.0
     return dot / (mag_a * mag_b)
 
-
-# ── Búsqueda semántica principal ──────────────────────
 async def semantic_search(
     db:          AsyncIOMotorDatabase,
     query:       str,
@@ -66,12 +47,11 @@ async def semantic_search(
       - similarity: score de similitud (0-1)
       - analysis:   semanticAnalysis si existe
     """
-    # 1. Vectorizar la consulta
+
     query_embedding = await get_embedding(query, ollama_url)
     if not query_embedding:
         return []
 
-    # 2. Obtener todas las canciones con embedding disponible
     lyrics_col = db["lyrics"]
     songs_col  = db["Music"]
 
@@ -94,7 +74,6 @@ async def semantic_search(
     if not lyrics_docs:
         return []
 
-    # 3. Calcular similitud para cada canción
     scored = []
     for doc in lyrics_docs:
         emb = doc.get("lyrics_embedding")
@@ -111,14 +90,12 @@ async def semantic_search(
                 ),
             })
 
-    # 4. Ordenar por similitud descendente y tomar top N
     scored.sort(key=lambda x: x["similarity"], reverse=True)
     top = scored[:limit]
 
     if not top:
         return []
 
-    # 5. Enriquecer con datos de Music
     song_ids = [item["songId"] for item in top]
     songs_cursor = songs_col.find(
         {"_id": {"$in": song_ids}},
@@ -129,7 +106,6 @@ async def semantic_search(
     songs_list = await songs_cursor.to_list(length=limit)
     songs_map  = {str(s["_id"]): s for s in songs_list}
 
-    # 6. Ensamblar resultado
     results = []
     for item in top:
         song_data = songs_map.get(str(item["songId"]))
@@ -145,16 +121,14 @@ async def semantic_search(
 
     return results
 
-
-# ── Generar explicación con el modelo ────────────────
 async def explain_results(
     query:   str,
     results: list[dict],
     ollama_url: str,
-    model:   str = "gemma2:2b",
+    model:   str = "gemma2:9b",
 ) -> str:
     """
-    Usa gemma2:2b para explicar por qué cada canción es relevante
+    Usa gemma2:9b para explicar por qué cada canción es relevante
     para la consulta del usuario.
     """
     if not results:

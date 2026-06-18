@@ -15,7 +15,7 @@ import { API, authHeaders } from '../lib/api';
 const Player = () => {
   const { currentSong, isPlaying, togglePlay, setCurrentSong, setPlaying, isRepeating, toggleRepeat } = usePlayerStore();
   const { queue, meta, registerPlay, loadQueue, getNext } = useQueue();
-  const { djState, startDJ, nextDJ, endDJ } = useDJSession();
+  const { djState, startDJ, nextDJ, endDJ, sendDJMessage } = useDJSession();
 
   const audioRef      = useRef<HTMLAudioElement>(null);
   const historyRef    = useRef<any[]>([]);
@@ -255,6 +255,18 @@ const Player = () => {
     if (currentSong?._id) loadQueue(currentSong._id);
   };
 
+  // El chat del DJ puede devolver PLAY_NOW con una canción nueva.
+  // Reproducimos directo sin tocar la sesión DJ (no la terminamos,
+  // a diferencia de onSelectSong cuando el usuario elige manualmente
+  // de la cola fuera del modo DJ).
+  const handleDJMessage = async (message: string) => {
+    const result = await sendDJMessage(message);
+    if (result?.action === 'PLAY_NOW' && result.song) {
+      goToSong(result.song);
+    }
+    return result;
+  };
+
   if (!currentSong) return null;
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -441,6 +453,9 @@ const Player = () => {
             djNarration={djState.narration}
             djMood={djState.mood}
             djLoading={djState.loading}
+            djMessages={djState.messages}
+            djChatLoading={djState.chatLoading}
+            onDJMessage={handleDJMessage}
             onDJStart={handleDJStart}
             onDJEnd={handleDJEnd}
           />
